@@ -13,6 +13,11 @@ export async function createProject(data: { name: string; path?: string }) {
   try {
     const userId = await requireAuth();
 
+    const duplicate = await db.project.findFirst({
+      where: { userId, name: { equals: data.name.trim(), mode: "insensitive" } },
+    });
+    if (duplicate) throw new Error("A project with this name already exists");
+
     const project = await db.project.create({
       data: {
         userId,
