@@ -4,8 +4,8 @@ import { z } from "zod";
 export const emailSchema = z
   .string()
   .min(1, "Email is required")
-  .email("Invalid email format")
-  .max(255, "Email is too long");
+  .max(254, "Email cannot exceed 254 characters")
+  .email("Invalid email format");
 
 // Account password validation (for login)
 export const passwordSchema = z
@@ -26,7 +26,11 @@ export const masterPasswordSchema = z
 export const nameSchema = z
   .string()
   .min(2, "Name must be at least 2 characters")
-  .max(100, "Name is too long")
+  .max(50, "Name cannot exceed 50 characters")
+  .regex(
+    /^[\p{L}\s\-']+$/u,
+    "Only letters, spaces, hyphens, and apostrophes allowed"
+  )
   .trim();
 
 // Registration schema
