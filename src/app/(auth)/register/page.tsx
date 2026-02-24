@@ -49,6 +49,7 @@ export default function RegisterPage() {
 
   function validateName(value: string) {
     if (value.length > 50) return "Name cannot exceed 50 characters";
+    if (value.length > 0 && value.length < 2) return "Name must be at least 2 characters";
     if (value.length > 0 && !NAME_REGEX.test(value))
       return "Only letters, spaces, hyphens, and apostrophes allowed";
     return "";
