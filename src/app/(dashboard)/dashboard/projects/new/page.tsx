@@ -19,25 +19,49 @@ import { createProject } from "@/lib/actions/projects";
 import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 
+const PATH_REGEX = /^(\/[^\s]*|[A-Za-z]:[/\][^\s]*|~\/[^\s]*)$/;
+
+function validateName(value: string): string {
+  if (!value.trim()) return "Project name cannot be empty";
+  return "";
+}
+
+function validatePath(value: string): string {
+  if (!value.trim()) return "";
+  if (!PATH_REGEX.test(value.trim()))
+    return "Enter a valid path (e.g. /Users/me/project or C:\projects\app)";
+  return "";
+}
+
 export default function NewProjectPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [nameValue, setNameValue] = useState("");
+  const [pathValue, setPathValue] = useState("");
+  const [nameError, setNameError] = useState("");
+  const [pathError, setPathError] = useState("");
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const nErr = validateName(nameValue);
+    const pErr = validatePath(pathValue);
+    setNameError(nErr);
+    setPathError(pErr);
+    if (nErr || pErr) return;
+
     setIsLoading(true);
-
-    const formData = new FormData(e.currentTarget);
-    const name = formData.get("name") as string;
-    const path = formData.get("path") as string;
-
     try {
-      const project = await createProject({ name, path: path || undefined });
+      const project = await createProject({
+        name: nameValue.trim(),
+        path: pathValue.trim() || undefined,
+      });
       toast.success("Project created successfully");
       router.push(`/dashboard/projects/${project.id}`);
     } catch (error) {
       logger.error("Failed to create project", error);
-      toast.error("Failed to create project");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to create project"
+      );
     } finally {
       setIsLoading(false);
     }
@@ -60,7 +84,7 @@ export default function NewProjectPage() {
             Add a new project to organize your environment variables
           </CardDescription>
         </CardHeader>
-        <form onSubmit={handleSubmit}>
+        <form onSubmit={handleSubmit} noValidate>
           <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="name">Project Name</Label>
@@ -70,7 +94,25 @@ export default function NewProjectPage() {
                 placeholder="my-awesome-project"
                 required
                 disabled={isLoading}
+                maxLength={50}
+                value={nameValue}
+                onChange={(e) => {
+                  setNameValue(e.target.value);
+                  if (nameError) setNameError(validateName(e.target.value));
+                }}
+                onBlur={() => setNameError(validateName(nameValue))}
+                aria-describedby="name-counter name-error"
               />
+              <div className="flex justify-between text-xs text-muted-foreground">
+                {nameError ? (
+                  <span id="name-error" className="text-destructive">
+                    {nameError}
+                  </span>
+                ) : (
+                  <span />
+                )}
+                <span id="name-counter">{nameValue.length}/50</span>
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="path">Local Path (optional)</Label>
@@ -79,7 +121,17 @@ export default function NewProjectPage() {
                 name="path"
                 placeholder="/Users/you/projects/my-awesome-project"
                 disabled={isLoading}
+                maxLength={500}
+                value={pathValue}
+                onChange={(e) => {
+                  setPathValue(e.target.value);
+                  if (pathError) setPathError(validatePath(e.target.value));
+                }}
+                onBlur={() => setPathError(validatePath(pathValue))}
               />
+              {pathError && (
+                <p className="text-xs text-destructive">{pathError}</p>
+              )}
               <p className="text-xs text-muted-foreground">
                 The local path where this project lives. Used for quick .env
                 export.
@@ -87,7 +139,10 @@ export default function NewProjectPage() {
             </div>
           </CardContent>
           <CardFooter className="flex gap-4">
-            <Button type="submit" disabled={isLoading}>
+            <Button
+              type="submit"
+              disabled={isLoading || !!nameError || !!pathError}
+            >
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Create Project
             </Button>
