@@ -42,7 +42,7 @@ export async function createProject(data: { name: string; path?: string }) {
 
     return project;
   } catch (error) {
-    if (error instanceof Error && error.message === "Unauthorized") throw error;
+    if (error instanceof Error && ["Unauthorized", "A project with this name already exists"].includes(error.message)) throw error;
     throw new Error("Failed to create project");
   }
 }
