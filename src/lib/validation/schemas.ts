@@ -25,13 +25,13 @@ export const masterPasswordSchema = z
 // Name validation
 export const nameSchema = z
   .string()
+  .trim()
   .min(2, "Name must be at least 2 characters")
   .max(50, "Name cannot exceed 50 characters")
   .regex(
-    /^[\p{L}\s\-']+$/u,
+    /^(?=.*\p{L})[\p{L}\s\-']+$/u,
     "Only letters, spaces, hyphens, and apostrophes allowed"
-  )
-  .trim();
+  );
 
 // Registration schema
 export const registerSchema = z.object({
