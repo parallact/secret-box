@@ -54,12 +54,6 @@ export default async function DashboardPage() {
             <p className="mt-2 text-center text-sm text-muted-foreground">
               Create your first project to start managing environment variables
             </p>
-            <Link href="/dashboard/projects/new">
-              <Button className="mt-4">
-                <Plus className="mr-2 h-4 w-4" />
-                Create Project
-              </Button>
-            </Link>
           </CardContent>
         </Card>
       ) : (
