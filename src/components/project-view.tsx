@@ -185,8 +185,9 @@ export function ProjectView({ project }: ProjectViewProps) {
         ...prev,
         [activeEnv]: prev[activeEnv].filter((variable) => !selectedVars.has(variable.id)),
       }));
+      const deletedCount = selectedVars.size;
       selectedVars.clear();
-      toast.success(`Deleted ${selectedVars.size} variable${selectedVars.size > 1 ? "s" : ""}`);
+      toast.success(`Deleted ${deletedCount} variable${deletedCount > 1 ? "s" : ""}`);
     } catch {
       toast.error("Failed to delete some variables");
     } finally {
