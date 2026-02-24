@@ -100,6 +100,13 @@ export const totpCodeSchema = z
   .length(6, "Code must be 6 digits")
   .regex(/^\d{6}$/, "Code must contain only numbers");
 
+// Backup code schema
+export const backupCodeSchema = z
+  .string()
+  .min(1, "Backup code is required")
+  .max(20, "Invalid backup code")
+  .regex(/^[A-Za-z0-9\-]+$/, "Invalid backup code format");
+
 // API Token schema
 export const apiTokenSchema = z.object({
   name: z
@@ -140,3 +147,4 @@ export type ProjectInput = z.infer<typeof projectSchema>;
 export type EnvironmentInput = z.infer<typeof environmentSchema>;
 export type VariableInput = z.infer<typeof variableSchema>;
 export type ApiTokenInput = z.infer<typeof apiTokenSchema>;
+export type BackupCodeInput = z.infer<typeof backupCodeSchema>;

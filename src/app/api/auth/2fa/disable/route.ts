@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import bcrypt from "bcryptjs";
 import { logger } from "@/lib/logger";
 import { logAudit } from "@/lib/audit";
+import { passwordSchema, validateInput } from "@/lib/validation/schemas";
 
 export async function POST(req: Request) {
   try {
@@ -13,14 +14,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { password } = await req.json();
+    const body = await req.json();
 
-    if (!password) {
-      return NextResponse.json(
-        { error: "Password is required to disable 2FA" },
-        { status: 400 }
-      );
+    const validation = validateInput(passwordSchema, body.password);
+    if (!validation.success) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
     }
+    const password = validation.data;
 
     // Get user with password hash
     const user = await db.user.findUnique({

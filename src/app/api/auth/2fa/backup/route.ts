@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { verifyBackupCode, removeBackupCode } from "@/lib/backup-codes";
 import { logAudit } from "@/lib/audit";
+import { backupCodeSchema, validateInput } from "@/lib/validation/schemas";
 
 export async function POST(req: Request) {
   try {
@@ -14,14 +15,12 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const code = body.code;
 
-    if (!code || typeof code !== "string") {
-      return NextResponse.json(
-        { error: "Backup code is required" },
-        { status: 400 }
-      );
+    const validation = validateInput(backupCodeSchema, body.code);
+    if (!validation.success) {
+      return NextResponse.json({ error: validation.error }, { status: 400 });
     }
+    const code = validation.data;
 
     // Get user with backup codes
     const user = await db.user.findUnique({
