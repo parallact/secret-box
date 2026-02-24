@@ -83,6 +83,7 @@ export const AddEnvironmentDialog = memo(function AddEnvironmentDialog({
                 placeholder="qa"
                 required
                 disabled={isLoading}
+                maxLength={50}
               />
               <p className="text-xs text-muted-foreground">
                 Use lowercase letters, numbers, and hyphens only.
