@@ -119,6 +119,7 @@ export const AddVariableDialog = memo(function AddVariableDialog({
                 name="value"
                 placeholder="postgresql://..."
                 disabled={isLoading}
+                maxLength={500}
               />
             </div>
             <div className="flex items-center gap-2">

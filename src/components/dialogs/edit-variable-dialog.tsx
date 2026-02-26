@@ -37,6 +37,7 @@ export const EditVariableDialog = memo(function EditVariableDialog({
   const [key, setKey] = useState(variable.key);
   const [value, setValue] = useState(variable.value);
   const [isSecret, setIsSecret] = useState(variable.isSecret);
+  const [keyError, setKeyError] = useState("");
 
   // Reset form when dialog opens with new variable
   useEffect(() => {
@@ -44,12 +45,17 @@ export const EditVariableDialog = memo(function EditVariableDialog({
       setKey(variable.key);
       setValue(variable.value);
       setIsSecret(variable.isSecret);
+      setKeyError("");
     }
   }, [open, variable]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!cryptoKey) return;
+    if (!key.trim()) {
+      setKeyError("Key cannot be empty");
+      return;
+    }
 
     setIsLoading(true);
 
@@ -90,11 +96,27 @@ export const EditVariableDialog = memo(function EditVariableDialog({
               <Input
                 id="edit-key"
                 value={key}
-                onChange={(e) => setKey(e.target.value)}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setKey(val);
+                  if (/\s/.test(val)) setKeyError("Key cannot contain spaces");
+                  else if (val && !/^[A-Za-z_]/.test(val)) setKeyError("Key must start with a letter or underscore");
+                  else setKeyError("");
+                }}
                 placeholder="DATABASE_URL"
                 required
                 disabled={isLoading}
+                maxLength={255}
+                aria-describedby={keyError ? "edit-key-error" : "edit-key-counter"}
               />
+              <div className="flex justify-between text-xs text-muted-foreground">
+                {keyError ? (
+                  <span id="edit-key-error" className="text-destructive">{keyError}</span>
+                ) : (
+                  <span />
+                )}
+                <span id="edit-key-counter">{key.length}/255</span>
+              </div>
             </div>
             <div className="space-y-2">
               <label htmlFor="edit-value" className="text-sm font-medium">
@@ -107,6 +129,7 @@ export const EditVariableDialog = memo(function EditVariableDialog({
                 placeholder="postgresql://..."
                 required
                 disabled={isLoading}
+                maxLength={500}
               />
             </div>
             <div className="flex items-center gap-2">
@@ -126,7 +149,7 @@ export const EditVariableDialog = memo(function EditVariableDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading || !cryptoKey}>
+            <Button type="submit" disabled={isLoading || !cryptoKey || !!keyError}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Save Changes
             </Button>

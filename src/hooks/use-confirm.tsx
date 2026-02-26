@@ -51,7 +51,7 @@ export function useConfirm() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{state.title}</AlertDialogTitle>
-            <AlertDialogDescription>{state.description}</AlertDialogDescription>
+            <AlertDialogDescription className="break-words">{state.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={handleCancel}>

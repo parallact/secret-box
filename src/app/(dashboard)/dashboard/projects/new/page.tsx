@@ -51,17 +51,19 @@ export default function NewProjectPage() {
 
     setIsLoading(true);
     try {
-      const project = await createProject({
+      const result = await createProject({
         name: nameValue.trim(),
         path: pathValue.trim() || undefined,
       });
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
       toast.success("Project created successfully");
-      router.push(`/dashboard/projects/${project.id}`);
+      router.push(`/dashboard/projects/${result.data!.id}`);
     } catch (error) {
       logger.error("Failed to create project", error);
-      toast.error(
-        error instanceof Error ? error.message : "Failed to create project"
-      );
+      toast.error("Failed to create project");
     } finally {
       setIsLoading(false);
     }

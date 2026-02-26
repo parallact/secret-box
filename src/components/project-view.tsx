@@ -284,7 +284,7 @@ export function ProjectView({ project }: ProjectViewProps) {
           <div className="flex items-center gap-2 overflow-x-auto">
             <TabsList>
               {project.environments.map((env) => (
-                <TabsTrigger key={env.id} value={env.id}>
+                <TabsTrigger key={env.id} value={env.id} className="max-w-[120px] truncate">
                   {env.name}
                 </TabsTrigger>
               ))}
@@ -457,9 +457,10 @@ export function ProjectView({ project }: ProjectViewProps) {
                         onCopy={() => clipboard.copy(variable.value, variable.id)}
                         onUpdate={(updated) => handleVariableUpdate(env.id, updated)}
                         onDelete={async () => {
+                          const truncatedKey = variable.key.length > 40 ? variable.key.slice(0, 40) + "..." : variable.key;
                           const ok = await confirm({
                             title: "Delete variable",
-                            description: `Are you sure you want to delete "${variable.key}"? This action cannot be undone.`,
+                            description: `Are you sure you want to delete "${truncatedKey}"? This action cannot be undone.`,
                             confirmText: "Delete",
                             variant: "destructive",
                           });

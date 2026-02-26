@@ -9,14 +9,25 @@ import {
 } from "@/lib/auth-helpers";
 import { logAudit } from "@/lib/audit";
 
-export async function createProject(data: { name: string; path?: string }) {
+const PATH_REGEX = /^(\/[^\s]*|[A-Za-z]:[/\\][^\s]*|~\/[^\s]*)$/;
+
+export async function createProject(data: {
+  name: string;
+  path?: string;
+}): Promise<{ data: Awaited<ReturnType<typeof db.project.create>> | null; error: string | null }> {
   try {
     const userId = await requireAuth();
+
+    if (!data.name?.trim()) return { data: null, error: "Project name cannot be empty" };
+    if (data.name.trim().length > 50) return { data: null, error: "Project name cannot exceed 50 characters" };
+    if (data.path && data.path.trim().length > 500) return { data: null, error: "Path is too long" };
+    if (data.path && data.path.trim() && !PATH_REGEX.test(data.path.trim()))
+      return { data: null, error: "Enter a valid path (e.g. /Users/me/project or C:\\projects\\app)" };
 
     const duplicate = await db.project.findFirst({
       where: { userId, name: { equals: data.name.trim(), mode: "insensitive" } },
     });
-    if (duplicate) throw new Error("A project with this name already exists");
+    if (duplicate) return { data: null, error: "A project with this name already exists" };
 
     const project = await db.project.create({
       data: {
@@ -40,10 +51,10 @@ export async function createProject(data: { name: string; path?: string }) {
 
     await logAudit({ userId, action: "CREATE_PROJECT", resource: "PROJECT", resourceId: project.id });
 
-    return project;
+    return { data: project, error: null };
   } catch (error) {
-    if (error instanceof Error && ["Unauthorized", "A project with this name already exists"].includes(error.message)) throw error;
-    throw new Error("Failed to create project");
+    if (error instanceof Error && error.message === "Unauthorized") throw error;
+    return { data: null, error: "Failed to create project" };
   }
 }
 
