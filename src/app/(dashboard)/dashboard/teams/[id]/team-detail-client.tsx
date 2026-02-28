@@ -295,6 +295,7 @@ function InviteMemberDialog({
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [role, setRole] = useState<TeamRole>("MEMBER");
+  const [emailValue, setEmailValue] = useState("");
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -306,6 +307,7 @@ function InviteMemberDialog({
     try {
       const member = await inviteMember({ teamId, email, role });
       toast.success("Member invited");
+      setEmailValue("");
       setOpen(false);
       onSuccess(member as Member);
     } catch (error) {
@@ -340,11 +342,16 @@ function InviteMemberDialog({
                 id="email"
                 name="email"
                 type="email"
+                value={emailValue}
+                onChange={(e) => setEmailValue(e.target.value)}
                 placeholder="colleague@example.com"
                 required
                 disabled={isLoading}
                 maxLength={254}
               />
+              <div className="flex justify-end text-xs text-muted-foreground">
+                <span>{emailValue.length}/254</span>
+              </div>
             </div>
             <div className="space-y-2">
               <label htmlFor="role" className="text-sm font-medium">
