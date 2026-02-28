@@ -118,6 +118,14 @@ export function TeamDetailClient({
   }
 
   async function handleRoleChange(memberId: string, role: TeamRole) {
+    const member = team.members.find((m: Member) => m.id === memberId);
+    const confirmed = await confirm({
+      title: "Change Member Role",
+      description: `Change ${member?.user.name || member?.user.email || "this member"}'s role to ${role}?`,
+      confirmText: "Change Role",
+    });
+    if (!confirmed) return;
+
     try {
       await updateMemberRole(id, memberId, role);
       setTeam((prev: Team) => ({
