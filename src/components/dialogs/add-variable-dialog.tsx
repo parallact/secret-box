@@ -33,6 +33,8 @@ export const AddVariableDialog = memo(function AddVariableDialog({
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [keyError, setKeyError] = useState("");
+  const [keyValue, setKeyValue] = useState("");
+  const [valueValue, setValueValue] = useState("");
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -54,6 +56,8 @@ export const AddVariableDialog = memo(function AddVariableDialog({
       });
 
       toast.success("Variable added");
+      setKeyValue("");
+      setValueValue("");
       setOpen(false);
       onSuccess({
         id: variable.id,
@@ -94,21 +98,28 @@ export const AddVariableDialog = memo(function AddVariableDialog({
               <Input
                 id="key"
                 name="key"
+                value={keyValue}
                 placeholder="DATABASE_URL"
                 required
                 disabled={isLoading}
                 maxLength={255}
                 onChange={(e) => {
                   const val = e.target.value;
+                  setKeyValue(val);
                   if (/\s/.test(val)) setKeyError("Key cannot contain spaces");
                   else if (val && !/^[A-Za-z_]/.test(val)) setKeyError("Key must start with a letter or underscore");
                   else setKeyError("");
                 }}
-                aria-describedby={keyError ? "key-error" : undefined}
+                aria-describedby={keyError ? "key-error" : "key-counter"}
               />
-              {keyError && (
-                <p id="key-error" className="text-xs text-destructive">{keyError}</p>
-              )}
+              <div className="flex justify-between text-xs text-muted-foreground">
+                {keyError ? (
+                  <span id="key-error" className="text-destructive">{keyError}</span>
+                ) : (
+                  <span />
+                )}
+                <span id="key-counter">{keyValue.length}/255</span>
+              </div>
             </div>
             <div className="space-y-2">
               <label htmlFor="value" className="text-sm font-medium">
@@ -117,10 +128,15 @@ export const AddVariableDialog = memo(function AddVariableDialog({
               <Input
                 id="value"
                 name="value"
+                value={valueValue}
                 placeholder="postgresql://..."
                 disabled={isLoading}
                 maxLength={500}
+                onChange={(e) => setValueValue(e.target.value)}
               />
+              <div className="flex justify-end text-xs text-muted-foreground">
+                <span>{valueValue.length}/500</span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <input

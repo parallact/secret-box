@@ -131,6 +131,9 @@ export const EditVariableDialog = memo(function EditVariableDialog({
                 disabled={isLoading}
                 maxLength={500}
               />
+              <div className="flex justify-end text-xs text-muted-foreground">
+                <span>{value.length}/500</span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <input
