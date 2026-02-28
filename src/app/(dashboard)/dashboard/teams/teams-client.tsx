@@ -17,7 +17,7 @@ import { Plus, Loader2 } from "lucide-react";
 import { createTeam } from "@/lib/actions/teams";
 import { toast } from "sonner";
 
-export function CreateTeamDialog({ variant }: { variant?: "empty-state" }) {
+export function CreateTeamDialog() {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const router = useRouter();
@@ -44,17 +44,10 @@ export function CreateTeamDialog({ variant }: { variant?: "empty-state" }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        {variant === "empty-state" ? (
-          <Button className="mt-4">
-            <Plus className="mr-2 h-4 w-4" />
-            Create Your First Team
-          </Button>
-        ) : (
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            New Team
-          </Button>
-        )}
+        <Button>
+          <Plus className="mr-2 h-4 w-4" />
+          New Team
+        </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>

@@ -35,7 +35,6 @@ export default async function TeamsPage() {
               <br />
               on your environment variables.
             </p>
-            <CreateTeamDialog variant="empty-state" />
           </CardContent>
         </Card>
       ) : (
