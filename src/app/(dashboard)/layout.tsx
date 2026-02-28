@@ -14,13 +14,18 @@ export default async function DashboardLayout({
     redirect("/login");
   }
 
-  // Fetch projects for search command
-  const projects = await db.project.findMany({
-    where: { userId: session.user.id },
-    select: { id: true, name: true },
-    orderBy: { updatedAt: "desc" },
-    take: 10, // Limit for performance
-  });
+  // Fetch projects for search command and pending invites count
+  const [projects, pendingInviteCount] = await Promise.all([
+    db.project.findMany({
+      where: { userId: session.user.id },
+      select: { id: true, name: true },
+      orderBy: { updatedAt: "desc" },
+      take: 10,
+    }),
+    db.teamInvite.count({
+      where: { userId: session.user.id, status: "PENDING" },
+    }),
+  ]);
 
   return (
     <DashboardShell
@@ -29,6 +34,7 @@ export default async function DashboardLayout({
         email: session.user?.email,
       }}
       projects={projects}
+      pendingInviteCount={pendingInviteCount}
     >
       {children}
     </DashboardShell>

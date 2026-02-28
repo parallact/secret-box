@@ -191,15 +191,7 @@ export function TeamDetailClient({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <InviteMemberDialog
-            teamId={id}
-            onSuccess={(member: Member) =>
-              setTeam((prev: Team) => ({
-                ...prev,
-                members: [...prev.members, member],
-              }))
-            }
-          />
+          <InviteMemberDialog teamId={id} />
           <Button
             variant="destructive"
             onClick={handleDeleteTeam}
@@ -430,13 +422,7 @@ function LinkProjectDialog({
   );
 }
 
-function InviteMemberDialog({
-  teamId,
-  onSuccess,
-}: {
-  teamId: string;
-  onSuccess: (member: Member) => void;
-}) {
+function InviteMemberDialog({ teamId }: { teamId: string }) {
   const [open, setOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [role, setRole] = useState<TeamRole>("MEMBER");
@@ -450,11 +436,10 @@ function InviteMemberDialog({
     const email = formData.get("email") as string;
 
     try {
-      const member = await inviteMember({ teamId, email, role });
-      toast.success("Member invited");
+      await inviteMember({ teamId, email, role });
+      toast.success("Invitation sent — waiting for user to accept");
       setEmailValue("");
       setOpen(false);
-      onSuccess(member as Member);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to invite member");
     } finally {

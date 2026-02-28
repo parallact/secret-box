@@ -67,6 +67,7 @@ model User {
   // Teams & API
   ownedTeams    Team[]       @relation("TeamOwner")
   teamMembers   TeamMember[]
+  teamInvites   TeamInvite[] @relation("TeamInvites")
   apiTokens     ApiToken[]
 
   createdAt DateTime @default(now())
@@ -183,6 +184,7 @@ model Team {
   owner     User         @relation("TeamOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members   TeamMember[]
   projects  TeamProject[]
+  invites   TeamInvite[]
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
@@ -210,6 +212,22 @@ model TeamProject {
   project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@id([teamId, projectId])
+}
+
+model TeamInvite {
+  id        String   @id @default(cuid())
+  teamId    String
+  userId    String
+  role      String   @default("MEMBER")
+  status    String   @default("PENDING") // PENDING | ACCEPTED | REJECTED
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user      User     @relation("TeamInvites", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
 }
 
 // ============================================

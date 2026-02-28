@@ -3,7 +3,7 @@
 import { useState, memo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Lock, LogOut, Settings, FolderKey, Key, LockOpen, Menu, X, Users } from "lucide-react";
+import { Lock, LogOut, Settings, FolderKey, Key, LockOpen, Menu, X, Users, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { VaultProvider } from "./vault-provider";
 import { useVaultStore } from "@/stores/vault-store";
@@ -19,9 +19,10 @@ interface DashboardShellProps {
     email?: string | null;
   };
   projects?: Array<{ id: string; name: string }>;
+  pendingInviteCount?: number;
 }
 
-export function DashboardShell({ children, user, projects = [] }: DashboardShellProps) {
+export function DashboardShell({ children, user, projects = [], pendingInviteCount = 0 }: DashboardShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
@@ -56,6 +57,7 @@ export function DashboardShell({ children, user, projects = [] }: DashboardShell
       <Sidebar
         user={user}
         projects={projects}
+        pendingInviteCount={pendingInviteCount}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
@@ -76,11 +78,13 @@ export function DashboardShell({ children, user, projects = [] }: DashboardShell
 const Sidebar = memo(function Sidebar({
   user,
   projects,
+  pendingInviteCount,
   isOpen,
   onClose,
 }: {
   user: { name?: string | null; email?: string | null };
   projects: Array<{ id: string; name: string }>;
+  pendingInviteCount: number;
   isOpen: boolean;
   onClose: () => void;
 }) {
@@ -149,6 +153,16 @@ const Sidebar = memo(function Sidebar({
             Teams
           </NavLink>
           <NavLink
+            href="/dashboard/invites"
+            icon={<Bell className="h-4 w-4" />}
+            isActive={pathname === "/dashboard/invites"}
+            onClick={onClose}
+            iconBg="bg-orange-500/10 text-orange-600 dark:text-orange-400"
+            badge={pendingInviteCount > 0 ? pendingInviteCount : undefined}
+          >
+            Invitations
+          </NavLink>
+          <NavLink
             href="/dashboard/settings"
             icon={<Settings className="h-4 w-4" />}
             isActive={pathname?.startsWith("/dashboard/settings")}
@@ -209,6 +223,7 @@ function NavLink({
   isActive,
   onClick,
   iconBg,
+  badge,
 }: {
   href: string;
   icon: React.ReactNode;
@@ -216,6 +231,7 @@ function NavLink({
   isActive?: boolean;
   onClick?: () => void;
   iconBg?: string;
+  badge?: number;
 }) {
   return (
     <Link
@@ -234,7 +250,12 @@ function NavLink({
       )}>
         {icon}
       </div>
-      {children}
+      <span className="flex-1">{children}</span>
+      {badge !== undefined && (
+        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-500 px-1.5 text-[10px] font-bold text-white">
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
     </Link>
   );
 }

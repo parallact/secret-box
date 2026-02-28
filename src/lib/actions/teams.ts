@@ -24,6 +24,8 @@ const KNOWN_ERRORS = [
   "Team not found or you're not the owner",
   "This user is not registered in My Secret Box.",
   "User is already a member of this team",
+  "Invite already pending for this user",
+  "Invite not found",
   "Member not found",
   "Cannot remove the team owner",
   "Project not found",
@@ -224,29 +226,25 @@ export async function inviteMember(data: InviteMemberInput) {
 
     // Check if already a member
     const existingMember = await db.teamMember.findUnique({
-      where: {
-        teamId_userId: {
-          teamId: data.teamId,
-          userId: user.id,
-        },
-      },
+      where: { teamId_userId: { teamId: data.teamId, userId: user.id } },
     });
-
     if (existingMember) {
       throw new Error("User is already a member of this team");
     }
 
-    const member = await db.teamMember.create({
-      data: {
-        teamId: data.teamId,
-        userId: user.id,
-        role: data.role,
-      },
-      include: {
-        user: {
-          select: { id: true, name: true, email: true },
-        },
-      },
+    // Check for existing pending invite
+    const existingInvite = await db.teamInvite.findUnique({
+      where: { teamId_userId: { teamId: data.teamId, userId: user.id } },
+    });
+    if (existingInvite?.status === "PENDING") {
+      throw new Error("Invite already pending for this user");
+    }
+
+    // Create or re-activate invite
+    await db.teamInvite.upsert({
+      where: { teamId_userId: { teamId: data.teamId, userId: user.id } },
+      update: { status: "PENDING", role: data.role },
+      create: { teamId: data.teamId, userId: user.id, role: data.role },
     });
 
     await logAudit({
@@ -258,11 +256,60 @@ export async function inviteMember(data: InviteMemberInput) {
     });
 
     revalidatePath(`/dashboard/teams/${data.teamId}`);
-
-    return member;
+    revalidatePath("/dashboard/invites");
   } catch (error) {
     if (isKnownError(error)) throw error;
     throw new Error("Failed to invite member");
+  }
+}
+
+export async function getPendingInvites() {
+  try {
+    const userId = await requireAuth();
+    return db.teamInvite.findMany({
+      where: { userId, status: "PENDING" },
+      include: {
+        team: {
+          include: {
+            owner: { select: { name: true, email: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  } catch (error) {
+    if (isKnownError(error)) throw error;
+    throw new Error("Failed to load invites");
+  }
+}
+
+export async function respondToInvite(inviteId: string, accept: boolean) {
+  try {
+    const userId = await requireAuth();
+    const invite = await db.teamInvite.findFirst({
+      where: { id: inviteId, userId },
+    });
+
+    if (!invite || invite.status !== "PENDING") {
+      throw new Error("Invite not found");
+    }
+
+    if (accept) {
+      await db.$transaction([
+        db.teamMember.create({
+          data: { teamId: invite.teamId, userId, role: invite.role as TeamRole },
+        }),
+        db.teamInvite.update({ where: { id: inviteId }, data: { status: "ACCEPTED" } }),
+      ]);
+    } else {
+      await db.teamInvite.update({ where: { id: inviteId }, data: { status: "REJECTED" } });
+    }
+
+    revalidatePath("/dashboard/teams");
+    revalidatePath("/dashboard/invites");
+  } catch (error) {
+    if (isKnownError(error)) throw error;
+    throw new Error("Failed to respond to invite");
   }
 }
 
