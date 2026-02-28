@@ -19,17 +19,8 @@ import { createProject } from "@/lib/actions/projects";
 import { toast } from "sonner";
 import { logger } from "@/lib/logger";
 
-const PATH_REGEX = /^(\/[^\s]*|[A-Za-z]:[/\][^\s]*|~\/[^\s]*)$/;
-
 function validateName(value: string): string {
   if (!value.trim()) return "Project name cannot be empty";
-  return "";
-}
-
-function validatePath(value: string): string {
-  if (!value.trim()) return "";
-  if (!PATH_REGEX.test(value.trim()))
-    return "Enter a valid path (e.g. /Users/me/project or C:\projects\app)";
   return "";
 }
 
@@ -37,23 +28,18 @@ export default function NewProjectPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [nameValue, setNameValue] = useState("");
-  const [pathValue, setPathValue] = useState("");
   const [nameError, setNameError] = useState("");
-  const [pathError, setPathError] = useState("");
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const nErr = validateName(nameValue);
-    const pErr = validatePath(pathValue);
     setNameError(nErr);
-    setPathError(pErr);
-    if (nErr || pErr) return;
+    if (nErr) return;
 
     setIsLoading(true);
     try {
       const result = await createProject({
         name: nameValue.trim(),
-        path: pathValue.trim() || undefined,
       });
       if (result.error) {
         toast.error(result.error);
@@ -116,34 +102,11 @@ export default function NewProjectPage() {
                 <span id="name-counter">{nameValue.length}/50</span>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="path">Local Path (optional)</Label>
-              <Input
-                id="path"
-                name="path"
-                placeholder="/Users/you/projects/my-awesome-project"
-                disabled={isLoading}
-                maxLength={500}
-                value={pathValue}
-                onChange={(e) => {
-                  setPathValue(e.target.value);
-                  if (pathError) setPathError(validatePath(e.target.value));
-                }}
-                onBlur={() => setPathError(validatePath(pathValue))}
-              />
-              {pathError && (
-                <p className="text-xs text-destructive">{pathError}</p>
-              )}
-              <p className="text-xs text-muted-foreground">
-                The local path where this project lives. Used for quick .env
-                export.
-              </p>
-            </div>
           </CardContent>
           <CardFooter className="flex gap-4">
             <Button
               type="submit"
-              disabled={isLoading || !!nameError || !!pathError}
+              disabled={isLoading || !!nameError}
             >
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Create Project

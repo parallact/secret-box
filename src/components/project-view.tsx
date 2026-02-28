@@ -245,9 +245,6 @@ export function ProjectView({ project }: ProjectViewProps) {
             Back to projects
           </Link>
           <h1 className="text-2xl font-bold md:text-3xl truncate">{project.name}</h1>
-          {project.path && (
-            <p className="text-sm text-muted-foreground">{project.path}</p>
-          )}
         </div>
         <div className="flex items-center gap-2">
           <ExportButton project={project} decryptedVars={decryptedVars} activeEnv={activeEnv} />
