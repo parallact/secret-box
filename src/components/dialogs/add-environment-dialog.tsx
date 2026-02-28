@@ -85,9 +85,10 @@ export const AddEnvironmentDialog = memo(function AddEnvironmentDialog({
                 disabled={isLoading}
                 maxLength={50}
               />
-              <p className="text-xs text-muted-foreground">
-                Use lowercase letters, numbers, and hyphens only.
-              </p>
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Use lowercase letters, numbers, and hyphens only.</span>
+                <span>{name.length}/50</span>
+              </div>
             </div>
           </div>
           <DialogFooter>
