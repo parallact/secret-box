@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getTeam } from "@/lib/actions/teams";
+import { getProjects } from "@/lib/actions/projects";
 import { TeamDetailClient } from "./team-detail-client";
 
 export default async function TeamDetailPage({
@@ -10,8 +11,11 @@ export default async function TeamDetailPage({
   const { id } = await params;
 
   try {
-    const team = await getTeam(id);
-    return <TeamDetailClient initialTeam={team} id={id} />;
+    const [team, userProjects] = await Promise.all([
+      getTeam(id),
+      getProjects().catch(() => []),
+    ]);
+    return <TeamDetailClient initialTeam={team} id={id} userProjects={userProjects} />;
   } catch {
     notFound();
   }

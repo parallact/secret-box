@@ -104,6 +104,15 @@ export async function deleteProject(projectId: string) {
   }
 }
 
+export async function getProjects() {
+  const userId = await requireAuth();
+  return db.project.findMany({
+    where: { userId },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+}
+
 export async function getProject(projectId: string) {
   try {
     const userId = await requireAuth();

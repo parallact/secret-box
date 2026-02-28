@@ -46,6 +46,8 @@ import {
   removeMember,
   updateMemberRole,
   deleteTeam,
+  linkProjectToTeam,
+  unlinkProjectFromTeam,
   type TeamRole,
 } from "@/lib/actions/teams";
 import { useConfirm } from "@/hooks/use-confirm";
@@ -53,6 +55,7 @@ import { toast } from "sonner";
 
 type Team = Awaited<ReturnType<typeof getTeam>>;
 type Member = Team["members"][number];
+type UserProject = { id: string; name: string };
 
 const roleIcons: Record<TeamRole, React.ReactNode> = {
   ADMIN: <Shield className="h-4 w-4 text-blue-500" />,
@@ -63,12 +66,15 @@ const roleIcons: Record<TeamRole, React.ReactNode> = {
 export function TeamDetailClient({
   initialTeam,
   id,
+  userProjects,
 }: {
   initialTeam: Team;
   id: string;
+  userProjects: UserProject[];
 }) {
   const [team, setTeam] = useState<Team>(initialTeam);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [unlinkingProjectId, setUnlinkingProjectId] = useState<string | null>(null);
   const router = useRouter();
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -137,6 +143,30 @@ export function TeamDetailClient({
       toast.success("Role updated");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to update role");
+    }
+  }
+
+  async function handleUnlinkProject(projectId: string) {
+    const confirmed = await confirm({
+      title: "Unlink Project",
+      description: "Remove this project from the team?",
+      confirmText: "Unlink",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
+
+    setUnlinkingProjectId(projectId);
+    try {
+      await unlinkProjectFromTeam(id, projectId);
+      setTeam((prev: Team) => ({
+        ...prev,
+        projects: prev.projects.filter((tp) => tp.project.id !== projectId),
+      }));
+      toast.success("Project unlinked");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to unlink project");
+    } finally {
+      setUnlinkingProjectId(null);
     }
   }
 
@@ -255,32 +285,62 @@ export function TeamDetailClient({
         {/* Linked Projects */}
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FolderKey className="h-5 w-5" />
-              Linked Projects
-            </CardTitle>
-            <CardDescription>
-              {team.projects.length} project{team.projects.length !== 1 ? "s" : ""}
-            </CardDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <FolderKey className="h-5 w-5" />
+                  Linked Projects
+                </CardTitle>
+                <CardDescription>
+                  {team.projects.length} project{team.projects.length !== 1 ? "s" : ""}
+                </CardDescription>
+              </div>
+              <LinkProjectDialog
+                teamId={id}
+                linkedProjectIds={team.projects.map((tp) => tp.project.id)}
+                userProjects={userProjects}
+                onSuccess={(project) =>
+                  setTeam((prev: Team) => ({
+                    ...prev,
+                    projects: [...prev.projects, { project } as Team["projects"][number]],
+                  }))
+                }
+              />
+            </div>
           </CardHeader>
           <CardContent>
             {team.projects.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted-foreground">
-                No projects linked yet.
-                <br />
-                Link a project from the project settings.
+                No projects linked yet. Use the button above to link a project.
               </p>
             ) : (
               <div className="space-y-2">
                 {team.projects.map((tp: Team["projects"][number]) => (
-                  <Link
+                  <div
                     key={tp.project.id}
-                    href={`/dashboard/projects/${tp.project.id}`}
                     className="flex items-center gap-2 rounded-md border p-3 transition-colors hover:bg-muted"
                   >
-                    <FolderKey className="h-4 w-4 text-muted-foreground" />
-                    <span>{tp.project.name}</span>
-                  </Link>
+                    <Link
+                      href={`/dashboard/projects/${tp.project.id}`}
+                      className="flex flex-1 items-center gap-2"
+                    >
+                      <FolderKey className="h-4 w-4 text-muted-foreground" />
+                      <span>{tp.project.name}</span>
+                    </Link>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => handleUnlinkProject(tp.project.id)}
+                      disabled={unlinkingProjectId === tp.project.id}
+                    >
+                      {unlinkingProjectId === tp.project.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
                 ))}
               </div>
             )}
@@ -290,6 +350,83 @@ export function TeamDetailClient({
 
       <ConfirmDialog />
     </div>
+  );
+}
+
+function LinkProjectDialog({
+  teamId,
+  linkedProjectIds,
+  userProjects,
+  onSuccess,
+}: {
+  teamId: string;
+  linkedProjectIds: string[];
+  userProjects: UserProject[];
+  onSuccess: (project: UserProject) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [linkingId, setLinkingId] = useState<string | null>(null);
+
+  const availableProjects = userProjects.filter(
+    (p) => !linkedProjectIds.includes(p.id)
+  );
+
+  async function handleLink(project: UserProject) {
+    setLinkingId(project.id);
+    try {
+      await linkProjectToTeam(teamId, project.id);
+      toast.success(`${project.name} linked to team`);
+      setOpen(false);
+      onSuccess(project);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to link project");
+    } finally {
+      setLinkingId(null);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">
+          <Plus className="mr-2 h-4 w-4" />
+          Add Project
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Link Project</DialogTitle>
+          <DialogDescription>
+            Select a project to link to this team.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="py-4">
+          {availableProjects.length === 0 ? (
+            <p className="text-center text-sm text-muted-foreground">
+              All your projects are already linked to this team.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {availableProjects.map((project) => (
+                <button
+                  key={project.id}
+                  onClick={() => handleLink(project)}
+                  disabled={!!linkingId}
+                  className="flex w-full items-center gap-3 rounded-md border p-3 text-left transition-colors hover:bg-muted disabled:opacity-50"
+                >
+                  {linkingId === project.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  ) : (
+                    <FolderKey className="h-4 w-4 text-muted-foreground" />
+                  )}
+                  <span>{project.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
