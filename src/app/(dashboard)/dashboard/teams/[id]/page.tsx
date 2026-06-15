@@ -10,13 +10,17 @@ export default async function TeamDetailPage({
 }) {
   const { id } = await params;
 
-  try {
-    const [team, userProjects] = await Promise.all([
-      getTeam(id),
-      getProjects().catch(() => []),
-    ]);
-    return <TeamDetailClient initialTeam={team} id={id} userProjects={userProjects} />;
-  } catch {
+  const data = await Promise.all([
+    getTeam(id),
+    getProjects().catch(() => []),
+  ]).catch(() => null);
+
+  if (!data) {
     notFound();
   }
+
+  const [team, userProjects] = data;
+  return (
+    <TeamDetailClient initialTeam={team} id={id} userProjects={userProjects} />
+  );
 }
