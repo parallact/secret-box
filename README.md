@@ -11,10 +11,10 @@ Secure environment variables management with end-to-end encryption. Your secrets
 Sharing `.env` files over Slack, email, or plaintext docs is a security nightmare. SecretBox fixes this:
 
 - **🔒 End-to-end encrypted** — Secrets are encrypted in your browser before hitting the server. We literally can't read them.
-- **👥 Team sharing** — Invite team members, manage roles, share environments securely.
+- **👥 Teams** — Create teams, invite members by email, and assign roles to organize who collaborates on which projects.
 - **📁 Project-based** — Organize variables by project and environment (dev, staging, prod).
-- **🌍 Global variables** — Share common vars across all projects.
-- **🔑 Two-password system** — Account password for login, master password for encryption. Even if the database leaks, your secrets are safe.
+- **🌍 Global variables** — Share common vars across all your own projects.
+- **🔑 Two-password system** — A separate account password for login and master password for encryption. The master password never leaves your browser, so the server only ever stores ciphertext.
 - **🛡️ 2FA support** — TOTP-based two-factor authentication with backup codes.
 
 ## Features
@@ -31,7 +31,7 @@ Sharing `.env` files over Slack, email, or plaintext docs is a security nightmar
 
 | Layer | Tech |
 |-------|------|
-| Framework | Next.js 15 (App Router) |
+| Framework | Next.js 16 (App Router) |
 | Database | Neon (PostgreSQL serverless) |
 | ORM | Prisma 6 |
 | Auth | NextAuth v5 (credentials + GitHub OAuth) |
@@ -46,7 +46,7 @@ Sharing `.env` files over Slack, email, or plaintext docs is a security nightmar
 ```
 Master Password
       ↓
-   PBKDF2 (100k iterations, SHA-256)
+   PBKDF2 (600k iterations, SHA-256)
       ↓
   Derived Key (AES-256)
       ↓
@@ -56,10 +56,10 @@ Master Password
 ```
 
 1. You set a **master password** (separate from your login password)
-2. The master password derives a cryptographic key using **PBKDF2** with 100,000 iterations
+2. The master password derives a cryptographic key using **PBKDF2** with 600,000 iterations
 3. All secrets are encrypted with **AES-256-GCM** in your browser
 4. Only the encrypted blob is sent to the server
-5. The master password is **never stored** anywhere — not even hashed
+5. The server stores only the encrypted blobs, a PBKDF2 salt, and a bcrypt verifier used to confirm your master password on unlock — never the master password itself or the derived key
 
 ## Getting Started
 
@@ -118,8 +118,8 @@ npm start
 ## Security
 
 - All encryption happens client-side using the Web Crypto API
-- Master passwords are never transmitted or stored
-- PBKDF2 with 100,000 iterations for key derivation
+- The master password is never transmitted to the server (only a bcrypt verifier and PBKDF2 salt are stored)
+- PBKDF2 with 600,000 iterations for key derivation
 - AES-256-GCM for authenticated encryption
 - Rate limiting on all API endpoints
 - CSRF protection via NextAuth

@@ -1,4 +1,4 @@
-// EnvVault Database Schema
+// SecretBox Database Schema
 
 generator client {
   provider = "prisma-client-js"
@@ -82,14 +82,14 @@ model VerificationToken {
 }
 
 // ============================================
-// EnvVault Models
+// SecretBox Models
 // ============================================
 
 model Project {
   id            String          @id @default(cuid())
   userId        String
   name          String
-  path          String?         // Path local del proyecto (referencia, encriptado)
+  path          String?         // Path local del proyecto (referencia en texto plano, no es un secreto)
   user          User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   environments  Environment[]
   linkedGlobals ProjectGlobal[]

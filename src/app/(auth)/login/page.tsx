@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,11 +28,44 @@ const shakeAnimation = {
 };
 
 export default function LoginPage() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [shake, setShake] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+
+  // Two-factor challenge state (shown after a valid password when 2FA is on).
+  const [step, setStep] = useState<"credentials" | "twoFactor">("credentials");
+  const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [useBackupCode, setUseBackupCode] = useState(false);
+
+  function triggerShake() {
+    setShake(true);
+    setTimeout(() => setShake(false), 500);
+  }
+
+  async function completeSignIn(
+    email: string,
+    password: string,
+    extra: { totpCode?: string; backupCode?: string } = {}
+  ): Promise<boolean> {
+    const result = await signIn("credentials", {
+      email,
+      password,
+      ...extra,
+      redirect: false,
+    });
+
+    if (!result || result.error) {
+      return false;
+    }
+
+    router.push("/dashboard");
+    router.refresh();
+    return true;
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -50,7 +84,8 @@ export default function LoginPage() {
     }
 
     try {
-      // First, validate credentials with rate limiting
+      // First, validate credentials with rate limiting and learn whether the
+      // account requires a second factor before creating the session.
       const validateRes = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -61,22 +96,62 @@ export default function LoginPage() {
 
       if (!validateRes.ok) {
         setError(validateData.error || "Invalid email or password");
-        setShake(true);
-        setTimeout(() => setShake(false), 500);
+        triggerShake();
         setIsLoading(false);
         return;
       }
 
-      // If credentials are valid, proceed with NextAuth signIn
-      await signIn("credentials", {
-        email,
-        password,
-        redirectTo: "/dashboard",
-      });
+      if (validateData.requires2FA) {
+        // Hold credentials and prompt for the 2FA code — the session is only
+        // created once authorize() verifies the code.
+        setCredentials({ email, password });
+        setStep("twoFactor");
+        setIsLoading(false);
+        return;
+      }
+
+      const ok = await completeSignIn(email, password);
+      if (!ok) {
+        setError("Invalid email or password");
+        triggerShake();
+        setIsLoading(false);
+      }
     } catch {
       setError("Invalid email or password");
-      setShake(true);
-      setTimeout(() => setShake(false), 500);
+      triggerShake();
+      setIsLoading(false);
+    }
+  }
+
+  async function handleTwoFactorSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!credentials) return;
+
+    setIsLoading(true);
+    setError("");
+
+    const trimmed = twoFactorCode.trim();
+    if (!trimmed) {
+      setError(useBackupCode ? "Enter a backup code" : "Enter your 6-digit code");
+      setIsLoading(false);
+      return;
+    }
+
+    try {
+      const ok = await completeSignIn(
+        credentials.email,
+        credentials.password,
+        useBackupCode ? { backupCode: trimmed } : { totpCode: trimmed }
+      );
+      if (!ok) {
+        setError(useBackupCode ? "Invalid backup code" : "Invalid verification code");
+        triggerShake();
+        setTwoFactorCode("");
+        setIsLoading(false);
+      }
+    } catch {
+      setError("Could not verify code. Please try again.");
+      triggerShake();
       setIsLoading(false);
     }
   }
@@ -99,7 +174,7 @@ export default function LoginPage() {
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.5 }}
         >
-          Welcome back
+          {step === "twoFactor" ? "Two-factor authentication" : "Welcome back"}
         </motion.h1>
         <motion.p
           className="text-muted-foreground"
@@ -107,7 +182,11 @@ export default function LoginPage() {
           animate={{ opacity: 1 }}
           transition={{ delay: 0.2 }}
         >
-          Sign in to access your vault
+          {step === "twoFactor"
+            ? useBackupCode
+              ? "Enter one of your backup codes"
+              : "Enter the 6-digit code from your authenticator app"
+            : "Sign in to access your vault"}
         </motion.p>
       </motion.div>
 
@@ -128,6 +207,7 @@ export default function LoginPage() {
       </AnimatePresence>
 
       {/* Form */}
+      {step === "credentials" ? (
       <motion.form
         onSubmit={handleSubmit}
         className="space-y-4"
@@ -220,27 +300,97 @@ export default function LoginPage() {
           </Button>
         </motion.div>
       </motion.form>
+      ) : (
+        <form onSubmit={handleTwoFactorSubmit} className="space-y-4" noValidate>
+          <div className="space-y-2">
+            <Label htmlFor="twoFactorCode">
+              {useBackupCode ? "Backup code" : "Verification code"}
+            </Label>
+            <Input
+              id="twoFactorCode"
+              name="twoFactorCode"
+              type="text"
+              inputMode={useBackupCode ? "text" : "numeric"}
+              autoComplete="one-time-code"
+              placeholder={useBackupCode ? "XXXX-XXXX" : "000000"}
+              required
+              autoFocus
+              disabled={isLoading}
+              maxLength={useBackupCode ? 20 : 6}
+              value={twoFactorCode}
+              onChange={(e) =>
+                setTwoFactorCode(
+                  useBackupCode
+                    ? e.target.value.toUpperCase()
+                    : e.target.value.replace(/\D/g, "")
+                )
+              }
+              className="h-11 text-center text-lg tracking-widest transition-shadow focus:shadow-md"
+            />
+          </div>
+
+          <Button type="submit" className="h-11 w-full" disabled={isLoading}>
+            {isLoading ? (
+              <span className="flex items-center">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Verifying...
+              </span>
+            ) : (
+              "Verify & sign in"
+            )}
+          </Button>
+
+          <div className="flex items-center justify-between text-sm">
+            <button
+              type="button"
+              onClick={() => {
+                setStep("credentials");
+                setCredentials(null);
+                setTwoFactorCode("");
+                setUseBackupCode(false);
+                setError("");
+              }}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              Back
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setUseBackupCode((v) => !v);
+                setTwoFactorCode("");
+                setError("");
+              }}
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
+              {useBackupCode ? "Use authenticator code" : "Use a backup code"}
+            </button>
+          </div>
+        </form>
+      )}
 
       {/* Footer */}
-      <motion.p
-        className="text-center text-sm text-muted-foreground"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.5 }}
-      >
-        Don&apos;t have an account?{" "}
-        <motion.span
-          whileHover={{ color: "hsl(var(--primary))" }}
-          className="inline-block"
+      {step === "credentials" && (
+        <motion.p
+          className="text-center text-sm text-muted-foreground"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
         >
-          <Link
-            href="/register"
-            className="font-medium text-primary underline-offset-4 hover:underline"
+          Don&apos;t have an account?{" "}
+          <motion.span
+            whileHover={{ color: "hsl(var(--primary))" }}
+            className="inline-block"
           >
-            Create one
-          </Link>
-        </motion.span>
-      </motion.p>
+            <Link
+              href="/register"
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
+              Create one
+            </Link>
+          </motion.span>
+        </motion.p>
+      )}
     </motion.div>
   );
 }
