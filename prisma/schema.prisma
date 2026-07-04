@@ -70,6 +70,10 @@ model User {
   teamInvites   TeamInvite[] @relation("TeamInvites")
   apiTokens     ApiToken[]
 
+  // Team E2E sharing (envelope encryption) — see src/lib/crypto/keypair.ts
+  keypair         UserKeypair?
+  projectKeyGrants ProjectKeyGrant[]
+
   createdAt DateTime @default(now())
 }
 
@@ -94,6 +98,10 @@ model Project {
   environments  Environment[]
   linkedGlobals ProjectGlobal[]
   teams         TeamProject[]
+  // Team E2E sharing: whether this project's variables are encrypted with a
+  // per-project DEK (true) vs the legacy owner-master-key scheme (false).
+  encryptionMigrated Boolean          @default(false)
+  keyGrants          ProjectKeyGrant[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 
@@ -248,4 +256,37 @@ model ApiToken {
 
   @@index([userId])
   @@index([tokenHash])
+}
+
+// ============================================
+// Team E2E Sharing (envelope encryption)
+// See src/lib/crypto/keypair.ts and docs/team-e2e-sharing.md
+// ============================================
+
+// Per-user RSA keypair. The public key is plaintext; the private key is stored
+// wrapped (AES-GCM encrypted) under the user's master-derived key — the server
+// never sees the private key in the clear.
+model UserKeypair {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  publicKey         String   // base64 SPKI (public)
+  wrappedPrivateKey String   // base64 AES-GCM ciphertext of the PKCS8 private key
+  keyIv             String   // base64 IV used to wrap the private key
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// A grant of a project's Data Encryption Key (DEK) to one user, wrapped with that
+// user's public key. Only the holder of the matching private key can unwrap it.
+model ProjectKeyGrant {
+  projectId  String
+  userId     String
+  wrappedDek String   // base64 RSA-OAEP ciphertext of the raw project DEK
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@id([projectId, userId])
+  @@index([userId])
 }
