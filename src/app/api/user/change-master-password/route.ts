@@ -129,6 +129,31 @@ export async function POST(req: Request) {
       }
     }
 
+    // Completeness guard: the payload must re-encrypt EVERY secret the user owns.
+    // If any variable is omitted, rotating the salt/master password would leave
+    // that secret encrypted under the old key with no way to ever decrypt it.
+    // The ownership checks above prove no foreign ids were sent; these counts
+    // prove no owned secret was left behind.
+    const [totalVariables, totalGlobals] = await Promise.all([
+      db.variable.count({
+        where: { environment: { project: { userId: session.user.id } } },
+      }),
+      db.globalVariable.count({ where: { userId: session.user.id } }),
+    ]);
+
+    if (
+      body.variables.length !== totalVariables ||
+      body.globalVariables.length !== totalGlobals
+    ) {
+      return NextResponse.json(
+        {
+          error:
+            "All secrets must be re-encrypted before changing the master password. Please unlock your vault and try again.",
+        },
+        { status: 409 }
+      );
+    }
+
     // Update everything in a transaction
     await db.$transaction(async (tx) => {
       // Update user with new salt and hashed password
