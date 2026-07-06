@@ -4,6 +4,10 @@ import { db } from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { logAudit } from "@/lib/audit";
 import { requireAuth, requireProjectOwnership } from "@/lib/auth-helpers";
+import {
+  reconcileProjectGrants,
+  reconcileGrantsForTeamProjects,
+} from "@/lib/team-grants";
 
 export type TeamRole = "ADMIN" | "MEMBER" | "VIEWER";
 
@@ -338,6 +342,10 @@ export async function removeMember(teamId: string, memberId: string) {
       where: { id: memberId },
     });
 
+    // Revoke the removed member's DEK grants for this team's shared projects,
+    // unless they still have access via another team (reconcile handles that).
+    await reconcileGrantsForTeamProjects(teamId);
+
     await logAudit({
       userId,
       action: "UPDATE_TEAM",
@@ -426,6 +434,10 @@ export async function unlinkProjectFromTeam(teamId: string, projectId: string) {
       },
     });
 
+    // Members who had access to this project only via this team link lose their
+    // grant; anyone still connected through another team keeps it.
+    await reconcileProjectGrants(projectId);
+
     revalidatePath(`/dashboard/teams/${teamId}`);
     revalidatePath(`/dashboard/projects/${projectId}`);
   } catch (error) {
@@ -450,9 +462,22 @@ export async function deleteTeam(teamId: string) {
       throw new Error("Team not found or you're not the owner");
     }
 
+    // Capture the projects this team shares before the cascade removes the
+    // links, so we can revoke the now-orphaned grants afterward.
+    const linkedProjects = await db.teamProject.findMany({
+      where: { teamId },
+      select: { projectId: true },
+    });
+
     await db.team.delete({
       where: { id: teamId },
     });
+
+    // Members lose their grants for this team's projects unless another team
+    // still links them.
+    for (const { projectId } of linkedProjects) {
+      await reconcileProjectGrants(projectId);
+    }
 
     await logAudit({
       userId,
