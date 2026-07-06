@@ -11,7 +11,11 @@ import {
   unwrapDekWithPrivateKey,
 } from "@/lib/crypto/keypair";
 import { getMyKeypair, saveMyKeypair } from "@/lib/actions/keypair";
-import { migrateProjectToDek as migrateProjectToDekAction, grantProjectAccess } from "@/lib/actions/project-keys";
+import {
+  migrateProjectToDek as migrateProjectToDekAction,
+  grantProjectAccess,
+  rotateProjectDek as rotateProjectDekAction,
+} from "@/lib/actions/project-keys";
 import { logger } from "@/lib/logger";
 import type {
   VaultState,
@@ -154,6 +158,45 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     );
     const { granted } = await grantProjectAccess(projectId, grants);
     return granted;
+  },
+
+  // Owner rotates the project DEK (forward secrecy after a revocation). The
+  // caller passes every decrypted variable and the current grantees' public
+  // keys; we mint a new DEK, re-encrypt, re-wrap, and swap it in atomically.
+  rotateProjectDek: async (projectId, decrypted, grantees) => {
+    if (grantees.length === 0) return false;
+    try {
+      const dek = await generateDek();
+      const reEncrypted = await Promise.all(
+        decrypted.map(async (v) => {
+          const enc = await encryptVariable(v.key, v.value, dek);
+          return {
+            id: v.id,
+            keyEncrypted: enc.keyEncrypted,
+            valueEncrypted: enc.valueEncrypted,
+            ivKey: enc.ivKey,
+            ivValue: enc.ivValue,
+          };
+        })
+      );
+      const grants = await Promise.all(
+        grantees.map(async (g) => {
+          const pub = await importPublicKey(g.publicKey);
+          const wrappedDek = await wrapDekForPublicKey(dek, pub);
+          return { userId: g.userId, wrappedDek };
+        })
+      );
+      const { error } = await rotateProjectDekAction(projectId, reEncrypted, grants);
+      if (error) {
+        logger.error("DEK rotation failed", error);
+        return false;
+      }
+      set((s) => ({ projectKeys: { ...s.projectKeys, [projectId]: dek } }));
+      return true;
+    } catch (error) {
+      logger.error("DEK rotation error", error);
+      return false;
+    }
   },
 
   // Set all projects

@@ -101,6 +101,10 @@ model Project {
   // Team E2E sharing: whether this project's variables are encrypted with a
   // per-project DEK (true) vs the legacy owner-master-key scheme (false).
   encryptionMigrated Boolean          @default(false)
+  // Set when a grant is revoked (member removed / project unlinked). The owner's
+  // client rotates the DEK on next open (re-encrypt + re-wrap for remaining
+  // grantees) so a revoked member's cached DEK can no longer decrypt new writes.
+  dekRotationPending Boolean          @default(false)
   keyGrants          ProjectKeyGrant[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt

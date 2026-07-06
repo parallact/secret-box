@@ -81,6 +81,13 @@ export interface VaultState {
     projectId: string,
     members: Array<{ userId: string; publicKey: string }>
   ) => Promise<number>;
+  // Owner rotates the project DEK after a revocation: generate a fresh DEK,
+  // re-encrypt every variable, and re-wrap it for the remaining grantees.
+  rotateProjectDek: (
+    projectId: string,
+    decrypted: DecryptedForMigration[],
+    grantees: Array<{ userId: string; publicKey: string }>
+  ) => Promise<boolean>;
   setAutoLockMinutes: (minutes: number) => void;
   setProjects: (projects: DecryptedProject[]) => void;
   setGlobalVariables: (globals: DecryptedGlobalVariable[]) => void;

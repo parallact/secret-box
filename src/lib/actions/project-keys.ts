@@ -126,8 +126,15 @@ export async function revokeProjectAccess(
     select: { id: true },
   });
   if (!project) return { error: "Project not found" };
-  await db.projectKeyGrant.deleteMany({
-    where: { projectId, userId: { in: userIds } },
+  await db.$transaction(async (tx) => {
+    const { count } = await tx.projectKeyGrant.deleteMany({
+      where: { projectId, userId: { in: userIds } },
+    });
+    // Flag for DEK rotation so the revoked member's cached DEK can't decrypt
+    // future writes (forward secrecy). The owner's client rotates on next open.
+    if (count > 0) {
+      await tx.project.update({ where: { id: projectId }, data: { dekRotationPending: true } });
+    }
   });
   revalidatePath(`/dashboard/projects/${projectId}`);
   return { error: null };
@@ -175,4 +182,110 @@ export async function getProjectGrantees(projectId: string): Promise<string[]> {
     select: { userId: true },
   });
   return grants.map((g) => g.userId);
+}
+
+// Grantees (besides the owner) with display info, for the "who has access" UI.
+export async function getProjectGranteesWithInfo(
+  projectId: string
+): Promise<Array<{ userId: string; name: string | null; email: string | null }>> {
+  const userId = await requireAuth();
+  const project = await db.project.findFirst({
+    where: { id: projectId, userId },
+    select: { id: true },
+  });
+  if (!project) return [];
+  const grants = await db.projectKeyGrant.findMany({
+    where: { projectId, userId: { not: userId } },
+    include: { user: { select: { id: true, name: true, email: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  return grants.map((g) => ({ userId: g.user.id, name: g.user.name, email: g.user.email }));
+}
+
+// All CURRENT grant holders (including the owner) with a public key, so the
+// owner's client can re-wrap a freshly rotated DEK for each of them.
+export async function getGranteesForRotation(
+  projectId: string
+): Promise<Array<{ userId: string; publicKey: string }>> {
+  const userId = await requireAuth();
+  const project = await db.project.findFirst({
+    where: { id: projectId, userId },
+    select: { id: true },
+  });
+  if (!project) return [];
+  const grants = await db.projectKeyGrant.findMany({
+    where: { projectId },
+    select: { user: { select: { id: true, keypair: { select: { publicKey: true } } } } },
+  });
+  return grants
+    .filter((g) => g.user.keypair)
+    .map((g) => ({ userId: g.user.id, publicKey: g.user.keypair!.publicKey }));
+}
+
+// Owner-driven DEK rotation (forward secrecy after a revocation). The owner has
+// generated a fresh DEK client-side, re-encrypted every variable with it, and
+// re-wrapped it for each remaining grantee. In one transaction: rewrite the
+// variables, replace all grants with the new set, and clear the rotation flag.
+export async function rotateProjectDek(
+  projectId: string,
+  reEncryptedVariables: ReEncryptedVariable[],
+  grants: Array<{ userId: string; wrappedDek: string }>
+): Promise<{ error: string | null }> {
+  const userId = await requireAuth();
+  const project = await db.project.findFirst({
+    where: { id: projectId, userId },
+    select: { id: true, encryptionMigrated: true },
+  });
+  if (!project) return { error: "Project not found" };
+  if (!project.encryptionMigrated) return { error: "Project is not DEK-encrypted" };
+
+  // The owner must retain access, and the new grant set must exactly match the
+  // current grantees — never silently add a new recipient or drop an existing
+  // one during a rotation.
+  const grantIds = new Set(grants.map((g) => g.userId));
+  if (!grantIds.has(userId)) return { error: "Owner grant missing" };
+  const current = await db.projectKeyGrant.findMany({
+    where: { projectId },
+    select: { userId: true },
+  });
+  const currentIds = new Set(current.map((g) => g.userId));
+  if (grantIds.size !== currentIds.size || [...grantIds].some((id) => !currentIds.has(id))) {
+    return { error: "Grant set does not match current grantees" };
+  }
+
+  // Ownership + completeness guards on the re-encrypted variables (same as the
+  // initial migration): every variable in the project must be rewritten.
+  const ids = reEncryptedVariables.map((v) => v.id);
+  if (ids.length > 0) {
+    const owned = await db.variable.count({
+      where: { id: { in: ids }, environment: { projectId } },
+    });
+    if (owned !== ids.length) return { error: "Unauthorized variable in payload" };
+  }
+  const total = await db.variable.count({ where: { environment: { projectId } } });
+  if (ids.length !== total) return { error: "All project variables must be re-encrypted" };
+
+  await db.$transaction(async (tx) => {
+    for (const v of reEncryptedVariables) {
+      await tx.variable.update({
+        where: { id: v.id },
+        data: {
+          keyEncrypted: v.keyEncrypted,
+          valueEncrypted: v.valueEncrypted,
+          ivKey: v.ivKey,
+          ivValue: v.ivValue,
+        },
+      });
+    }
+    await tx.projectKeyGrant.deleteMany({ where: { projectId } });
+    await tx.projectKeyGrant.createMany({
+      data: grants.map((g) => ({ projectId, userId: g.userId, wrappedDek: g.wrappedDek })),
+    });
+    await tx.project.update({
+      where: { id: projectId },
+      data: { dekRotationPending: false },
+    });
+  });
+  revalidatePath(`/dashboard/projects/${projectId}`);
+  return { error: null };
 }
