@@ -24,6 +24,7 @@
  */
 
 import { db } from "@/lib/db";
+import { selectGranteesToRevoke } from "@/lib/team-grants-logic";
 
 /**
  * Revoke DEK grants for any user no longer authorized to access `projectId`.
@@ -48,18 +49,30 @@ export async function reconcileProjectGrants(projectId: string): Promise<number>
     },
     select: { id: true },
   });
-  const authorizedIds = new Set(authorized.map((u) => u.id));
-  authorizedIds.add(project.userId); // never revoke the project owner
-
   const grants = await db.projectKeyGrant.findMany({
     where: { projectId },
     select: { userId: true },
   });
-  const toRevoke = grants.map((g) => g.userId).filter((uid) => !authorizedIds.has(uid));
+  const toRevoke = selectGranteesToRevoke(
+    grants.map((g) => g.userId),
+    authorized.map((u) => u.id),
+    project.userId
+  );
   if (toRevoke.length === 0) return 0;
 
-  const { count } = await db.projectKeyGrant.deleteMany({
-    where: { projectId, userId: { in: toRevoke } },
+  const count = await db.$transaction(async (tx) => {
+    const { count } = await tx.projectKeyGrant.deleteMany({
+      where: { projectId, userId: { in: toRevoke } },
+    });
+    // Flag the project for DEK rotation so the owner's client re-keys it and the
+    // revoked member's cached DEK can't decrypt future writes (forward secrecy).
+    if (count > 0) {
+      await tx.project.update({
+        where: { id: projectId },
+        data: { dekRotationPending: true },
+      });
+    }
+    return count;
   });
   return count;
 }

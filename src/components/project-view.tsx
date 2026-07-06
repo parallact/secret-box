@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, memo, useCallback, useEffect } from "react";
+import { useState, useMemo, memo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -46,12 +46,18 @@ import {
   X,
   Key,
   Share2,
+  UserMinus,
 } from "lucide-react";
 import { useVaultStore } from "@/stores/vault-store";
 import { decryptVariable } from "@/lib/crypto/encryption";
 import { deleteVariable } from "@/lib/actions/variables";
 import { deleteProject, deleteEnvironment, updateProject } from "@/lib/actions/projects";
-import { getShareableMembers } from "@/lib/actions/project-keys";
+import {
+  getShareableMembers,
+  getProjectGranteesWithInfo,
+  getGranteesForRotation,
+  revokeProjectAccess,
+} from "@/lib/actions/project-keys";
 import { ImportEnvDialog } from "@/components/import-env-dialog";
 import { EditVariableDialog } from "@/components/dialogs/edit-variable-dialog";
 import { AddVariableDialog } from "@/components/dialogs/add-variable-dialog";
@@ -99,6 +105,12 @@ interface ProjectViewProps {
   globals?: RawGlobal[];
 }
 
+interface Grantee {
+  userId: string;
+  name: string | null;
+  email: string | null;
+}
+
 export function ProjectView({ project, globals = [] }: ProjectViewProps) {
   const router = useRouter();
   const cryptoKey = useVaultStore((state) => state.cryptoKey);
@@ -106,10 +118,17 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
   const getProjectKey = useVaultStore((state) => state.getProjectKey);
   const migrateProjectToDek = useVaultStore((state) => state.migrateProjectToDek);
   const grantProjectToMembers = useVaultStore((state) => state.grantProjectToMembers);
+  const rotateProjectDek = useVaultStore((state) => state.rotateProjectDek);
   // The key used for this project's variables: the per-project DEK (shared /
   // migrated projects) or the legacy master key. Globals stay on the master key.
   const [projectKey, setProjectKey] = useState<CryptoKey | null>(null);
   const [isSharing, setIsSharing] = useState(false);
+  // Share/access-management dialog state.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [grantees, setGrantees] = useState<Grantee[]>([]);
+  const [granteesLoading, setGranteesLoading] = useState(false);
+  // Guards the auto-rotation effect against re-firing while a rotation is in flight.
+  const rotatingRef = useRef(false);
   const [activeEnv, setActiveEnv] = useState(project.environments[0]?.id || "");
   const [decryptedVars, setDecryptedVars] = useState<Record<string, DecryptedVar[]>>({});
   const [isDeleting, setIsDeleting] = useState(false);
@@ -214,6 +233,101 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
       .catch(() => setGlobalsDecryptError(true));
   }, [cryptoKey, globals]);
 
+  // Decrypt every variable in the project with the given key (all environments).
+  const decryptAllProjectVars = useCallback(
+    async (key: CryptoKey) => {
+      const all = project.environments.flatMap((e) => e.variables);
+      return Promise.all(
+        all.map(async (v) => {
+          const { key: k, value } = await decryptVariable(
+            v.keyEncrypted,
+            v.valueEncrypted,
+            v.ivKey,
+            v.ivValue,
+            key
+          );
+          return { id: v.id, key: k, value };
+        })
+      );
+    },
+    [project.environments]
+  );
+
+  const refreshGrantees = useCallback(() => {
+    if (!project.isOwner) return;
+    setGranteesLoading(true);
+    getProjectGranteesWithInfo(project.id)
+      .then(setGrantees)
+      .catch((error) => logger.error("Failed to load grantees", error))
+      .finally(() => setGranteesLoading(false));
+  }, [project.id, project.isOwner]);
+
+  // Load the current grantee list when the share dialog opens.
+  useEffect(() => {
+    if (shareOpen) refreshGrantees();
+  }, [shareOpen, refreshGrantees]);
+
+  // Forward secrecy: after a revocation the project is flagged for DEK rotation.
+  // The owner's client (which can decrypt) mints a new DEK, re-encrypts every
+  // variable, and re-wraps it for the remaining grantees on next open.
+  useEffect(() => {
+    if (!project.isOwner || !project.encryptionMigrated || !project.dekRotationPending) return;
+    if (!projectKey || rotatingRef.current) return;
+    rotatingRef.current = true;
+    (async () => {
+      try {
+        const [decrypted, granteesForRotation] = await Promise.all([
+          decryptAllProjectVars(projectKey),
+          getGranteesForRotation(project.id),
+        ]);
+        const ok = await rotateProjectDek(project.id, decrypted, granteesForRotation);
+        if (ok) {
+          toast.success("Clave del proyecto rotada por seguridad");
+          router.refresh();
+        }
+      } catch (error) {
+        logger.error("Automatic DEK rotation failed", error);
+      } finally {
+        rotatingRef.current = false;
+      }
+    })();
+  }, [
+    project.isOwner,
+    project.encryptionMigrated,
+    project.dekRotationPending,
+    project.id,
+    projectKey,
+    decryptAllProjectVars,
+    rotateProjectDek,
+    router,
+  ]);
+
+  // Owner revokes a single grantee's access (then the rotation flag re-keys).
+  async function handleRevoke(grantee: Grantee) {
+    const label = grantee.name || grantee.email || "este miembro";
+    const confirmed = await confirm({
+      title: "Quitar acceso",
+      description: `¿Quitar el acceso de ${label} a este proyecto?`,
+      confirmText: "Quitar",
+      variant: "destructive",
+    });
+    if (!confirmed) return;
+    try {
+      const { error } = await revokeProjectAccess(project.id, [grantee.userId]);
+      if (error) {
+        toast.error(error);
+        return;
+      }
+      setGrantees((prev) => prev.filter((g) => g.userId !== grantee.userId));
+      toast.success("Acceso removido");
+      // getProject now reports dekRotationPending → the effect above re-keys.
+      router.refresh();
+    } catch (error) {
+      logger.error("Revoke failed", error);
+      toast.error("No se pudo quitar el acceso");
+    }
+  }
+
   // Share this project's secrets with the members of the team(s) it's linked to:
   // migrate to a per-project DEK (if needed) and wrap it for each member's key.
   async function handleShare() {
@@ -221,19 +335,7 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
     setIsSharing(true);
     try {
       if (!project.encryptionMigrated) {
-        const allVars = project.environments.flatMap((e) => e.variables);
-        const decrypted = await Promise.all(
-          allVars.map(async (v) => {
-            const { key, value } = await decryptVariable(
-              v.keyEncrypted,
-              v.valueEncrypted,
-              v.ivKey,
-              v.ivValue,
-              projectKey
-            );
-            return { id: v.id, key, value };
-          })
-        );
+        const decrypted = await decryptAllProjectVars(projectKey);
         const migrated = await migrateProjectToDek(project.id, decrypted);
         if (!migrated) {
           toast.error("No se pudo preparar el proyecto para compartir");
@@ -253,6 +355,7 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
           ? `Compartido con ${granted} miembro(s) del equipo`
           : "No hay miembros nuevos para compartir"
       );
+      refreshGrantees();
       router.refresh();
     } catch (error) {
       logger.error("Share failed", error);
@@ -369,12 +472,13 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
           )}
           <ExportButton project={project} decryptedVars={decryptedVars} activeEnv={activeEnv} />
           {project.isOwner && (
-            <Button variant="outline" size="sm" onClick={handleShare} disabled={isSharing || !projectKey}>
-              {isSharing ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Share2 className="mr-2 h-4 w-4" />
-              )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShareOpen(true)}
+              disabled={!projectKey}
+            >
+              <Share2 className="mr-2 h-4 w-4" />
               Compartir
             </Button>
           )}
@@ -700,6 +804,72 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
       )}
 
       <ConfirmDialog />
+
+      {project.isOwner && (
+        <Dialog open={shareOpen} onOpenChange={setShareOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Compartir proyecto</DialogTitle>
+              <DialogDescription>
+                Compartí los secretos de este proyecto con los miembros de tu equipo.
+                Cada miembro los desencripta con su propia contraseña maestra; nadie
+                comparte contraseñas.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-2">
+              <p className="mb-2 text-sm font-medium">Con acceso</p>
+              {granteesLoading ? (
+                <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Cargando…
+                </div>
+              ) : grantees.length === 0 ? (
+                <p className="py-2 text-xs text-muted-foreground">
+                  Todavía no compartiste este proyecto con nadie.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {grantees.map((g) => (
+                    <div
+                      key={g.userId}
+                      className="flex items-center justify-between rounded-md border p-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">
+                          {g.name || g.email}
+                        </p>
+                        {g.name && g.email && (
+                          <p className="truncate text-xs text-muted-foreground">
+                            {g.email}
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleRevoke(g)}
+                        aria-label="Quitar acceso"
+                      >
+                        <UserMinus className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button onClick={handleShare} disabled={isSharing || !projectKey}>
+                {isSharing ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Share2 className="mr-2 h-4 w-4" />
+                )}
+                Compartir con el equipo
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       <Dialog open={isEditingName} onOpenChange={setIsEditingName}>
         <DialogContent>
