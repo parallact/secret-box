@@ -126,7 +126,11 @@ export async function getProject(projectId: string) {
     const userId = await requireAuth();
 
     const project = await db.project.findFirst({
-      where: { id: projectId, userId },
+      where: {
+        id: projectId,
+        // Owner, or a team member who holds a DEK grant for this project.
+        OR: [{ userId }, { keyGrants: { some: { userId } } }],
+      },
       include: {
         environments: {
           include: {
@@ -141,6 +145,7 @@ export async function getProject(projectId: string) {
             global: true,
           },
         },
+        keyGrants: { where: { userId }, select: { wrappedDek: true } },
       },
     });
 
@@ -148,7 +153,17 @@ export async function getProject(projectId: string) {
       throw new Error("Project not found");
     }
 
-    return project;
+    const isOwner = project.userId === userId;
+    const { keyGrants, ...rest } = project;
+    return {
+      ...rest,
+      isOwner,
+      // The caller's wrapped project DEK (null for a legacy, not-yet-migrated project).
+      myWrappedDek: keyGrants[0]?.wrappedDek ?? null,
+      // Members can't decrypt the owner's personal globals (owner-master-key
+      // encrypted), so don't return ciphertext they can't open.
+      linkedGlobals: isOwner ? project.linkedGlobals : [],
+    };
   } catch (error) {
     if (error instanceof Error && ["Unauthorized", "Project not found"].includes(error.message)) throw error;
     throw new Error("Failed to load project");

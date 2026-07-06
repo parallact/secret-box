@@ -41,11 +41,22 @@ export interface DecryptedProject {
   updatedAt: Date;
 }
 
+export interface DecryptedForMigration {
+  id: string;
+  key: string;
+  value: string;
+}
+
 export interface VaultState {
   // State
   isUnlocked: boolean;
   isLoading: boolean;
   cryptoKey: CryptoKey | null;
+  // Team sharing (envelope encryption): the user's keypair (private key in memory,
+  // public key base64) and a cache of unwrapped per-project DEKs.
+  privateKey: CryptoKey | null;
+  publicKey: string | null;
+  projectKeys: Record<string, CryptoKey>;
   projects: DecryptedProject[];
   globalVariables: DecryptedGlobalVariable[];
   autoLockMinutes: number;
@@ -53,6 +64,23 @@ export interface VaultState {
   // Actions
   unlock: (masterPassword: string, salt: string) => Promise<void>;
   lock: () => void;
+  // Resolve the key to encrypt/decrypt a project's variables: the per-project DEK
+  // when migrated, or the legacy master key otherwise.
+  getProjectKey: (
+    projectId: string,
+    migrated: boolean,
+    myWrappedDek: string | null
+  ) => Promise<CryptoKey>;
+  // Owner-driven lazy migration of a legacy project to the DEK model.
+  migrateProjectToDek: (
+    projectId: string,
+    decrypted: DecryptedForMigration[]
+  ) => Promise<boolean>;
+  // Owner grants the project DEK to team members (wrapping it for each pubkey).
+  grantProjectToMembers: (
+    projectId: string,
+    members: Array<{ userId: string; publicKey: string }>
+  ) => Promise<number>;
   setAutoLockMinutes: (minutes: number) => void;
   setProjects: (projects: DecryptedProject[]) => void;
   setGlobalVariables: (globals: DecryptedGlobalVariable[]) => void;
