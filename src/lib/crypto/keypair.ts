@@ -22,11 +22,11 @@
  * Everything here runs in the browser. The server never sees a private key, a
  * DEK, or any plaintext.
  *
- * NOTE: this is the cryptographic foundation for team E2E sharing. Wiring it into
- * the variable read/write paths, the lazy per-project migration, and the sharing
- * flow is tracked in docs/team-e2e-sharing.md and must be built + tested against a
- * running instance before it is enabled — a mistake here can permanently lock
- * secrets. It is intentionally not yet used by production code paths.
+ * These primitives are wired into production via the vault store (keypair
+ * lifecycle + per-project DEKs), the lazy per-project migration and sharing
+ * server actions (src/lib/actions/keypair.ts, project-keys.ts), and the
+ * master-password rotation flow (which re-wraps the private key). A mistake here
+ * can permanently lock secrets — see docs/team-e2e-sharing.md.
  */
 
 import { arrayBufferToBase64, base64ToArrayBuffer } from "./encryption";

@@ -24,6 +24,10 @@ export interface DecryptedGlobal extends DecryptedVar {
 export type ProjectWithRelations = Project & {
   environments: (Environment & { variables: Variable[] })[];
   linkedGlobals: (ProjectGlobal & { global: GlobalVariable })[];
+  // Team sharing: whether the caller owns the project, and their wrapped DEK
+  // grant (null for a legacy / not-yet-migrated project).
+  isOwner: boolean;
+  myWrappedDek: string | null;
 };
 
 /**

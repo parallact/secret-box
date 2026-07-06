@@ -21,6 +21,14 @@ const changePasswordSchema = z.object({
   newSalt: z.string().min(1),
   variables: z.array(reEncryptedVariableSchema),
   globalVariables: z.array(reEncryptedVariableSchema),
+  // Team-sharing RSA private key, re-wrapped under the NEW master key. Present
+  // only for users who have generated a sharing keypair; omitted otherwise.
+  keypair: z
+    .object({
+      wrappedPrivateKey: z.string().min(1),
+      keyIv: z.string().min(1),
+    })
+    .optional(),
 });
 
 export async function POST(req: Request) {
@@ -90,13 +98,19 @@ export async function POST(req: Request) {
     // Hash the new master password
     const newHashedPassword = await bcrypt.hash(body.newMasterPasswordHash, 12);
 
-    // Verify ownership of all variables before updating
+    // Verify ownership of all variables before updating. Restrict to legacy
+    // (non-migrated) projects: DEK-migrated projects are encrypted with a
+    // per-project key, so re-encrypting their variables with the master key
+    // would corrupt them. Any migrated-project id here is rejected as
+    // unauthorized rather than silently overwritten.
     if (body.variables.length > 0) {
       const variableIds = body.variables.map((v) => v.id);
       const ownedVariables = await db.variable.findMany({
         where: {
           id: { in: variableIds },
-          environment: { project: { userId: session.user.id } },
+          environment: {
+            project: { userId: session.user.id, encryptionMigrated: false },
+          },
         },
         select: { id: true },
       });
@@ -129,14 +143,19 @@ export async function POST(req: Request) {
       }
     }
 
-    // Completeness guard: the payload must re-encrypt EVERY secret the user owns.
-    // If any variable is omitted, rotating the salt/master password would leave
-    // that secret encrypted under the old key with no way to ever decrypt it.
-    // The ownership checks above prove no foreign ids were sent; these counts
-    // prove no owned secret was left behind.
+    // Completeness guard: the payload must re-encrypt EVERY master-key-encrypted
+    // secret the user owns. If any is omitted, rotating the salt/master password
+    // would leave it encrypted under the old key with no way to ever decrypt it.
+    // Only legacy (non-migrated) project variables are counted — DEK-migrated
+    // projects use a per-project key that a master-password change does not
+    // touch, so the client correctly omits them.
     const [totalVariables, totalGlobals] = await Promise.all([
       db.variable.count({
-        where: { environment: { project: { userId: session.user.id } } },
+        where: {
+          environment: {
+            project: { userId: session.user.id, encryptionMigrated: false },
+          },
+        },
       }),
       db.globalVariable.count({ where: { userId: session.user.id } }),
     ]);
@@ -187,6 +206,19 @@ export async function POST(req: Request) {
             valueEncrypted: globalVar.valueEncrypted,
             ivKey: globalVar.ivKey,
             ivValue: globalVar.ivValue,
+          },
+        });
+      }
+
+      // Re-wrap the team-sharing private key under the new master key.
+      // updateMany is a no-op if the user has no keypair row, so this never
+      // throws for users who never enabled sharing.
+      if (body.keypair) {
+        await tx.userKeypair.updateMany({
+          where: { userId: session.user.id },
+          data: {
+            wrappedPrivateKey: body.keypair.wrappedPrivateKey,
+            keyIv: body.keypair.keyIv,
           },
         });
       }

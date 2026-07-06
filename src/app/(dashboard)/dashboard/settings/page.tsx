@@ -41,6 +41,8 @@ import {
   decryptVariable,
   validateMasterPassword,
 } from "@/lib/crypto/encryption";
+import { rewrapPrivateKey } from "@/lib/crypto/keypair";
+import { getMyKeypair } from "@/lib/actions/keypair";
 
 export default function SettingsPage() {
   const autoLockMinutes = useVaultStore((state) => state.autoLockMinutes);
@@ -337,6 +339,10 @@ function ChangeMasterPasswordDialog() {
       }> = [];
 
       for (const project of projects) {
+        // DEK-migrated projects are encrypted with a per-project key, not the
+        // master key, so they are unaffected by a master-password rotation.
+        // Skip them — trying to decrypt them with the master key would fail.
+        if (project.encryptionMigrated) continue;
         for (const env of project.environments || []) {
           for (const v of env.variables || []) {
             allVariables.push(v);
@@ -395,7 +401,25 @@ function ChangeMasterPasswordDialog() {
         })
       );
 
-      // Step 5: Send to server
+      // Step 5: Re-wrap the team-sharing keypair (if any) with the new master
+      // key. The private key is wrapped under the master key; without this the
+      // user would lose access to every shared/migrated project after re-login.
+      let rewrappedKeypair: { wrappedPrivateKey: string; keyIv: string } | undefined;
+      const keypair = await getMyKeypair();
+      if (keypair) {
+        const rewrapped = await rewrapPrivateKey(
+          keypair.wrappedPrivateKey,
+          keypair.keyIv,
+          cryptoKey,
+          newCryptoKey
+        );
+        rewrappedKeypair = {
+          wrappedPrivateKey: rewrapped.wrapped,
+          keyIv: rewrapped.iv,
+        };
+      }
+
+      // Step 6: Send to server
       setProgress({ current: 5, total: 5, message: "Saving changes..." });
 
       const response = await fetch("/api/user/change-master-password", {
@@ -407,6 +431,7 @@ function ChangeMasterPasswordDialog() {
           newSalt,
           variables: reencryptedVariables,
           globalVariables: reencryptedGlobals,
+          keypair: rewrappedKeypair,
         }),
       });
 

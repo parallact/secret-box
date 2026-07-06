@@ -45,11 +45,13 @@ import {
   Search,
   X,
   Key,
+  Share2,
 } from "lucide-react";
 import { useVaultStore } from "@/stores/vault-store";
 import { decryptVariable } from "@/lib/crypto/encryption";
 import { deleteVariable } from "@/lib/actions/variables";
 import { deleteProject, deleteEnvironment, updateProject } from "@/lib/actions/projects";
+import { getShareableMembers } from "@/lib/actions/project-keys";
 import { ImportEnvDialog } from "@/components/import-env-dialog";
 import { EditVariableDialog } from "@/components/dialogs/edit-variable-dialog";
 import { AddVariableDialog } from "@/components/dialogs/add-variable-dialog";
@@ -100,6 +102,14 @@ interface ProjectViewProps {
 export function ProjectView({ project, globals = [] }: ProjectViewProps) {
   const router = useRouter();
   const cryptoKey = useVaultStore((state) => state.cryptoKey);
+  const privateKey = useVaultStore((state) => state.privateKey);
+  const getProjectKey = useVaultStore((state) => state.getProjectKey);
+  const migrateProjectToDek = useVaultStore((state) => state.migrateProjectToDek);
+  const grantProjectToMembers = useVaultStore((state) => state.grantProjectToMembers);
+  // The key used for this project's variables: the per-project DEK (shared /
+  // migrated projects) or the legacy master key. Globals stay on the master key.
+  const [projectKey, setProjectKey] = useState<CryptoKey | null>(null);
+  const [isSharing, setIsSharing] = useState(false);
   const [activeEnv, setActiveEnv] = useState(project.environments[0]?.id || "");
   const [decryptedVars, setDecryptedVars] = useState<Record<string, DecryptedVar[]>>({});
   const [isDeleting, setIsDeleting] = useState(false);
@@ -122,7 +132,7 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
   // Decrypt variables for an environment - memoized to prevent unnecessary re-renders
   const decryptEnvVariables = useCallback(
     async (envId: string) => {
-      if (!cryptoKey) return;
+      if (!projectKey) return;
 
       const env = project.environments.find((e) => e.id === envId);
       if (!env) return;
@@ -135,7 +145,7 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
               v.valueEncrypted,
               v.ivKey,
               v.ivValue,
-              cryptoKey
+              projectKey
             );
             return { id: v.id, key, value, isSecret: v.isSecret, updatedAt: v.updatedAt };
           })
@@ -147,7 +157,7 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
         toast.error("Failed to decrypt variables");
       }
     },
-    [cryptoKey, project.environments]
+    [projectKey, project.environments]
   );
 
   // Filtered variables for the active environment
@@ -164,12 +174,26 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
     setSearchQuery("");
   }
 
-  // Initialize decryption when activeEnv or cryptoKey changes
+  // Resolve the project key (DEK for shared/migrated projects, else master key).
   useEffect(() => {
-    if (activeEnv && !decryptedVars[activeEnv] && cryptoKey) {
+    if (!cryptoKey) return;
+    let cancelled = false;
+    getProjectKey(project.id, project.encryptionMigrated, project.myWrappedDek)
+      .then((k) => {
+        if (!cancelled) setProjectKey(k);
+      })
+      .catch((error) => logger.error("Failed to resolve project key", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [project.id, project.encryptionMigrated, project.myWrappedDek, cryptoKey, privateKey, getProjectKey]);
+
+  // Initialize decryption when activeEnv or the project key changes
+  useEffect(() => {
+    if (activeEnv && !decryptedVars[activeEnv] && projectKey) {
       decryptEnvVariables(activeEnv);
     }
-  }, [activeEnv, cryptoKey, decryptEnvVariables, decryptedVars]);
+  }, [activeEnv, projectKey, decryptEnvVariables, decryptedVars]);
 
   // Decrypt globals when cryptoKey becomes available
   useEffect(() => {
@@ -189,6 +213,54 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
       .then(setDecryptedGlobals)
       .catch(() => setGlobalsDecryptError(true));
   }, [cryptoKey, globals]);
+
+  // Share this project's secrets with the members of the team(s) it's linked to:
+  // migrate to a per-project DEK (if needed) and wrap it for each member's key.
+  async function handleShare() {
+    if (!project.isOwner || !projectKey) return;
+    setIsSharing(true);
+    try {
+      if (!project.encryptionMigrated) {
+        const allVars = project.environments.flatMap((e) => e.variables);
+        const decrypted = await Promise.all(
+          allVars.map(async (v) => {
+            const { key, value } = await decryptVariable(
+              v.keyEncrypted,
+              v.valueEncrypted,
+              v.ivKey,
+              v.ivValue,
+              projectKey
+            );
+            return { id: v.id, key, value };
+          })
+        );
+        const migrated = await migrateProjectToDek(project.id, decrypted);
+        if (!migrated) {
+          toast.error("No se pudo preparar el proyecto para compartir");
+          return;
+        }
+      }
+      const members = await getShareableMembers(project.id);
+      if (members.length === 0) {
+        toast.error(
+          "Primero vinculá el proyecto a un equipo (desde Equipos); los miembros deben haber iniciado sesión al menos una vez."
+        );
+        return;
+      }
+      const granted = await grantProjectToMembers(project.id, members);
+      toast.success(
+        granted > 0
+          ? `Compartido con ${granted} miembro(s) del equipo`
+          : "No hay miembros nuevos para compartir"
+      );
+      router.refresh();
+    } catch (error) {
+      logger.error("Share failed", error);
+      toast.error("Error al compartir el proyecto");
+    } finally {
+      setIsSharing(false);
+    }
+  }
 
   async function handleDeleteProject() {
     const confirmed = await confirm({
@@ -290,31 +362,48 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
           <h1 className="text-2xl font-bold md:text-3xl truncate">{project.name}</h1>
         </div>
         <div className="flex items-center gap-2">
+          {!project.isOwner && (
+            <span className="rounded-md border border-(--color-border) px-2 py-1 text-xs text-muted-foreground">
+              Compartido contigo
+            </span>
+          )}
           <ExportButton project={project} decryptedVars={decryptedVars} activeEnv={activeEnv} />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="icon">
-                <MoreVertical className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onClick={() => { setEditName(project.name); setIsEditingName(true); }}
-              >
-                <Pencil className="mr-2 h-4 w-4" />
-                Edit Name
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive"
-                onClick={handleDeleteProject}
-                disabled={isDeleting}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete Project
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {project.isOwner && (
+            <Button variant="outline" size="sm" onClick={handleShare} disabled={isSharing || !projectKey}>
+              {isSharing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Share2 className="mr-2 h-4 w-4" />
+              )}
+              Compartir
+            </Button>
+          )}
+          {project.isOwner && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={() => { setEditName(project.name); setIsEditingName(true); }}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  Edit Name
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={handleDeleteProject}
+                  disabled={isDeleting}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete Project
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -337,7 +426,7 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
           <div className="flex items-center gap-2">
             <ImportEnvDialog
               environmentId={activeEnv}
-              cryptoKey={cryptoKey}
+              cryptoKey={projectKey}
               onSuccess={() => {
                 setDecryptedVars((prev) => {
                   const next = { ...prev };
@@ -348,7 +437,7 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
             />
             <AddVariableDialog
               environmentId={activeEnv}
-              cryptoKey={cryptoKey}
+              cryptoKey={projectKey}
               onSuccess={(newVar) => {
                 setDecryptedVars((prev) => ({
                   ...prev,
@@ -376,7 +465,7 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
                       sourceEnvId={env.id}
                       sourceEnvName={env.name}
                       environments={project.environments.map((e) => ({ id: e.id, name: e.name }))}
-                      cryptoKey={cryptoKey}
+                      cryptoKey={projectKey}
                       decryptedVars={decryptedVars[env.id] || []}
                       onSuccess={(targetEnvId, copiedVars) => {
                         setDecryptedVars((prev) => ({
@@ -488,7 +577,7 @@ export function ProjectView({ project, globals = [] }: ProjectViewProps) {
                       <VariableRow
                         key={variable.id}
                         variable={variable}
-                        cryptoKey={cryptoKey}
+                        cryptoKey={projectKey}
                         isVisible={visibleValues.has(variable.id)}
                         isSelected={selectedVars.has(variable.id)}
                         isCopied={clipboard.isCopied(variable.id)}
