@@ -16,8 +16,11 @@ const reEncryptedVariableSchema = z.object({
 });
 
 const changePasswordSchema = z.object({
-  currentPasswordHash: z.string().min(1),
-  newMasterPasswordHash: z.string().min(1),
+  // Zero-knowledge: the client sends the CURRENT master password's auth
+  // verifier (to prove ownership) and the NEW master password's verifier (to be
+  // hashed and stored). Neither plaintext master password reaches the server.
+  currentVerifier: z.string().min(1),
+  newVerifier: z.string().min(1),
   newSalt: z.string().min(1),
   variables: z.array(reEncryptedVariableSchema),
   globalVariables: z.array(reEncryptedVariableSchema),
@@ -63,6 +66,7 @@ export async function POST(req: Request) {
         id: true,
         masterPassword: true,
         encryptionSalt: true,
+        authVersion: true,
       },
     });
 
@@ -73,9 +77,20 @@ export async function POST(req: Request) {
       );
     }
 
-    // Verify current password hash matches
+    // The verifier scheme is only valid once the account has been upgraded to
+    // authVersion 2 (which happens on unlock — a prerequisite for reaching this
+    // flow, since re-encrypting secrets requires an unlocked vault). Guard
+    // against a stale legacy account whose stored hash is still over plaintext.
+    if (user.authVersion < 2) {
+      return NextResponse.json(
+        { error: "Please unlock your vault again before changing your master password." },
+        { status: 409 }
+      );
+    }
+
+    // Verify the current master password via its derived verifier
     const isCurrentPasswordValid = await bcrypt.compare(
-      body.currentPasswordHash,
+      body.currentVerifier,
       user.masterPassword
     );
 
@@ -95,8 +110,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Hash the new master password
-    const newHashedPassword = await bcrypt.hash(body.newMasterPasswordHash, 12);
+    // Hash the new master password's verifier for storage
+    const newHashedPassword = await bcrypt.hash(body.newVerifier, 12);
 
     // Verify ownership of all variables before updating. Restrict to legacy
     // (non-migrated) projects: DEK-migrated projects are encrypted with a

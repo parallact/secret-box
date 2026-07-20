@@ -88,6 +88,63 @@ export async function deriveKey(
 }
 
 /**
+ * Domain-separation label for the authentication verifier. Combined with the
+ * per-user salt it makes the verifier's PBKDF2 input distinct from the vault
+ * key's, so the two derivations are cryptographically independent: learning the
+ * verifier (or its bcrypt hash) reveals nothing about the AES vault key.
+ */
+const AUTH_VERIFIER_LABEL = "secretbox-auth-verifier|v1|";
+
+/**
+ * Derive the server-side authentication VERIFIER from the master password.
+ *
+ * This is the ONLY master-password-derived value that is ever sent to the
+ * server. The server stores bcrypt(verifier) and compares against it on
+ * unlock / register / master-password change. The plaintext master password
+ * and the AES vault key (see deriveKey) never leave the browser, preserving the
+ * end-to-end / zero-knowledge model.
+ *
+ * The verifier is domain-separated from the vault key via AUTH_VERIFIER_LABEL,
+ * so it cannot be used to reconstruct the vault key. Returns base64 of 32 bytes
+ * (well under bcrypt's 72-byte input limit).
+ */
+export async function deriveAuthVerifier(
+  masterPassword: string,
+  saltBase64: string
+): Promise<string> {
+  const encoder = new TextEncoder();
+  const saltBytes = new Uint8Array(base64ToArrayBuffer(saltBase64));
+
+  // Prefix the salt with a fixed label so the PBKDF2 salt differs from the one
+  // deriveKey() uses (the raw salt), guaranteeing independent outputs.
+  const labelBytes = encoder.encode(AUTH_VERIFIER_LABEL);
+  const verifierSalt = new Uint8Array(labelBytes.length + saltBytes.length);
+  verifierSalt.set(labelBytes, 0);
+  verifierSalt.set(saltBytes, labelBytes.length);
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(masterPassword),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: verifierSalt as Uint8Array<ArrayBuffer>,
+      iterations: ITERATIONS,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    KEY_LENGTH
+  );
+
+  return arrayBufferToBase64(bits);
+}
+
+/**
  * Encrypt a string value
  * Returns: { encrypted: base64, iv: base64 }
  */

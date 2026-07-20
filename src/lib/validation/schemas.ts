@@ -33,12 +33,24 @@ export const nameSchema = z
     "Only letters, spaces, hyphens, and apostrophes allowed"
   );
 
-// Registration schema
+// Base64 blob (salt / verifier) sent from the client. We never see the
+// plaintext master password, so we only sanity-check shape here.
+const base64BlobSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .regex(/^[A-Za-z0-9+/]+={0,2}$/, "Invalid encoding");
+
+// Registration schema (zero-knowledge): the client derives the encryption salt
+// and the authentication verifier locally and sends only those. The plaintext
+// master password never reaches the server, so master-password strength is
+// enforced client-side (see validateMasterPassword) instead of here.
 export const registerSchema = z.object({
   name: nameSchema,
   email: emailSchema,
   password: passwordSchema,
-  masterPassword: masterPasswordSchema,
+  masterVerifier: base64BlobSchema,
+  encryptionSalt: base64BlobSchema,
 });
 
 // Login schema
@@ -47,9 +59,14 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Password is required"),
 });
 
-// Unlock vault schema
+// Unlock vault schema (zero-knowledge). The client always sends the derived
+// `verifier`. `masterPassword` (plaintext) is present ONLY for legacy accounts
+// (authVersion 1) whose stored hash is still over the plaintext — it is used
+// once to verify + transparently upgrade them to the verifier scheme, after
+// which it is never sent again.
 export const unlockSchema = z.object({
-  masterPassword: z.string().min(1, "Master password is required"),
+  verifier: base64BlobSchema,
+  masterPassword: z.string().min(1).max(128).optional(),
 });
 
 // Project schema

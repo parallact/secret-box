@@ -52,6 +52,10 @@ export interface VaultState {
   isUnlocked: boolean;
   isLoading: boolean;
   cryptoKey: CryptoKey | null;
+  // The active key-derivation salt (base64) for the unlocked vault. Kept so the
+  // client can derive the current auth verifier (e.g. to change the master
+  // password) without re-fetching it. Not a secret.
+  salt: string | null;
   // Team sharing (envelope encryption): the user's keypair (private key in memory,
   // public key base64) and a cache of unwrapped per-project DEKs.
   privateKey: CryptoKey | null;

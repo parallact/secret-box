@@ -37,6 +37,7 @@ const TwoFactorDisable = dynamic(
 import {
   generateSalt,
   deriveKey,
+  deriveAuthVerifier,
   encryptVariable,
   decryptVariable,
   validateMasterPassword,
@@ -285,11 +286,12 @@ function ChangeMasterPasswordDialog() {
   const [step, setStep] = useState<"form" | "processing">("form");
   const [progress, setProgress] = useState({ current: 0, total: 0, message: "" });
   const cryptoKey = useVaultStore((state) => state.cryptoKey);
+  const currentSalt = useVaultStore((state) => state.salt);
   const lock = useVaultStore((state) => state.lock);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!cryptoKey) {
+    if (!cryptoKey || !currentSalt) {
       toast.error("Vault must be unlocked to change password");
       return;
     }
@@ -422,12 +424,18 @@ function ChangeMasterPasswordDialog() {
       // Step 6: Send to server
       setProgress({ current: 5, total: 5, message: "Saving changes..." });
 
+      // Zero-knowledge: prove ownership with the current master password's
+      // verifier and send the new master password's verifier for storage.
+      // Neither plaintext master password is transmitted.
+      const currentVerifier = await deriveAuthVerifier(currentPassword, currentSalt);
+      const newVerifier = await deriveAuthVerifier(newPassword, newSalt);
+
       const response = await fetch("/api/user/change-master-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          currentPasswordHash: currentPassword,
-          newMasterPasswordHash: newPassword,
+          currentVerifier,
+          newVerifier,
           newSalt,
           variables: reencryptedVariables,
           globalVariables: reencryptedGlobals,
