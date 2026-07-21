@@ -5,7 +5,6 @@ import { logger } from "@/lib/logger";
 import { logAudit } from "@/lib/audit";
 import { registerLimiter, getClientIp, checkRateLimit, rateLimitHeaders, formatRetryTime } from "@/lib/rate-limit";
 import { registerSchema, validateInput } from "@/lib/validation/schemas";
-import { generateSalt } from "@/lib/crypto/encryption";
 
 export async function POST(req: Request) {
   try {
@@ -35,7 +34,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { name, email, password, masterPassword } = validation.data;
+    const { name, email, password, masterVerifier, encryptionSalt } = validation.data;
 
     // Check if user already exists
     const existingUser = await db.user.findUnique({
@@ -49,12 +48,12 @@ export async function POST(req: Request) {
       );
     }
 
-    // Hash passwords
+    // Hash the login password. For the vault we store bcrypt(verifier): the
+    // client derived the verifier from the master password + a client-generated
+    // salt, so the plaintext master password never reaches the server
+    // (zero-knowledge). authVersion 2 marks the verifier scheme.
     const hashedPassword = await bcrypt.hash(password, 12);
-    const hashedMasterPassword = await bcrypt.hash(masterPassword, 12);
-
-    // Generate encryption salt (this will be used to derive the encryption key)
-    const encryptionSalt = generateSalt();
+    const hashedMasterVerifier = await bcrypt.hash(masterVerifier, 12);
 
     // Create user
     const user = await db.user.create({
@@ -62,8 +61,9 @@ export async function POST(req: Request) {
         name,
         email: email.toLowerCase(),
         password: hashedPassword,
-        masterPassword: hashedMasterPassword,
+        masterPassword: hashedMasterVerifier,
         encryptionSalt,
+        authVersion: 2,
       },
     });
 

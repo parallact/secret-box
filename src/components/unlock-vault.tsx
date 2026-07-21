@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Lock, Loader2, AlertCircle } from "lucide-react";
 import { useVaultStore } from "@/stores/vault-store";
+import { deriveAuthVerifier } from "@/lib/crypto/encryption";
 import { logger } from "@/lib/logger";
 
 export function UnlockVault() {
@@ -28,11 +29,33 @@ export function UnlockVault() {
     setIsLoading(true);
 
     try {
-      // Call API to verify master password and get salt
+      // Step 1: fetch the (non-secret) salt + auth scheme so we can derive the
+      // verifier locally. The plaintext master password is never sent for
+      // modern (verifier) accounts.
+      const saltRes = await fetch("/api/vault/unlock");
+      const saltData = await saltRes.json();
+
+      if (!saltRes.ok) {
+        setError(saltData.error || "Failed to unlock vault");
+        setIsLoading(false);
+        return;
+      }
+
+      const salt: string = saltData.salt;
+      const authVersion: number = saltData.authVersion ?? 1;
+
+      // Step 2: prove knowledge of the master password via the derived verifier.
+      // Legacy (authVersion 1) accounts also send the plaintext ONCE so the
+      // server can verify against the old hash and upgrade them to the verifier
+      // scheme; every subsequent unlock is verifier-only.
+      const verifier = await deriveAuthVerifier(masterPassword, salt);
+      const payload =
+        authVersion >= 2 ? { verifier } : { verifier, masterPassword };
+
       const res = await fetch("/api/vault/unlock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ masterPassword }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -43,8 +66,8 @@ export function UnlockVault() {
         return;
       }
 
-      // Derive encryption key from master password and salt
-      await unlock(masterPassword, data.salt);
+      // Derive encryption key from master password and salt (client-side only)
+      await unlock(masterPassword, salt);
 
       // Clear the password from memory
       setMasterPassword("");

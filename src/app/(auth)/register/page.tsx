@@ -11,6 +11,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   validateMasterPassword,
   calculatePasswordStrength,
+  generateSalt,
+  deriveAuthVerifier,
 } from "@/lib/crypto/encryption";
 import { validateName, validateEmail } from "@/lib/validation/client-schemas";
 
@@ -74,10 +76,16 @@ export default function RegisterPage() {
     }
 
     try {
+      // Zero-knowledge: derive the encryption salt and the authentication
+      // verifier locally. Only the verifier + salt are sent — never the
+      // plaintext master password.
+      const encryptionSalt = generateSalt();
+      const masterVerifier = await deriveAuthVerifier(masterPassword, encryptionSalt);
+
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password, masterPassword }),
+        body: JSON.stringify({ name, email, password, masterVerifier, encryptionSalt }),
       });
 
       const data = await res.json();

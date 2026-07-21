@@ -54,7 +54,12 @@ model User {
 
   // SecretBox specific
   encryptionSalt String?          // Salt para derivar master key (base64)
-  masterPassword String?          // Hashed master password (separate from login password)
+  masterPassword String?          // Hashed authentication material (separate from login password)
+  // Auth-material scheme for `masterPassword`:
+  //   1 = legacy: bcrypt(plaintext master password)  [pre zero-knowledge]
+  //   2 = verifier: bcrypt(client-derived auth verifier)  [master password never sent]
+  // Existing rows default to 1 and are transparently upgraded to 2 on next unlock.
+  authVersion    Int              @default(1)
   projects       Project[]
   globalVars     GlobalVariable[]
   auditLogs      AuditLog[]

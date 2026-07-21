@@ -51,6 +51,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
   isUnlocked: false,
   isLoading: false,
   cryptoKey: null,
+  salt: null,
   privateKey: null,
   publicKey: null,
   projectKeys: {},
@@ -69,7 +70,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     set({ isLoading: true });
     try {
       const key = await deriveKey(masterPassword, salt);
-      set({ cryptoKey: key, isUnlocked: true, isLoading: false });
+      set({ cryptoKey: key, salt, isUnlocked: true, isLoading: false });
       // Load / create the sharing keypair (non-blocking for the unlock itself).
       await ensureKeypair(key, set);
     } catch (error) {
@@ -83,6 +84,7 @@ export const useVaultStore = create<VaultState>((set, get) => ({
     set({
       isUnlocked: false,
       cryptoKey: null,
+      salt: null,
       privateKey: null,
       publicKey: null,
       projectKeys: {},
